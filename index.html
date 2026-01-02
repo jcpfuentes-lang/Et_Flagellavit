@@ -2,11 +2,9 @@
 "use strict";
 
 /* =========================
-   0) ANIMACIÓN (segura)
+   0) ANIMACIÓN (a prueba de fallos)
    ========================= */
 (function(){
-  // Si el script grande falla en alguna parte, el head ya mete is-ready.
-  // Esto es redundante pero no molesta.
   const markReady = () => requestAnimationFrame(() => document.body.classList.add("is-ready"));
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", markReady, { once:true });
@@ -16,7 +14,7 @@
 })();
 
 /* =========================
-   1) CONFIG: TRACKS
+   1) TRACKS
    ========================= */
 const TRACKS = [
   {"name":"BOMBARDINO 1","url":"audio/01_BOMBARDINO_1.mp3"},
@@ -40,8 +38,8 @@ const TRACKS = [
    2) HELPERS UI
    ========================= */
 const $ = (id) => document.getElementById(id);
-
 const toastEl = $("toast");
+
 function toast(msg){
   if(!toastEl) return;
   toastEl.textContent = msg;
@@ -66,86 +64,84 @@ function setProgress(text, pct){
 }
 
 /* =========================
-   3) AUDIO ENGINE (WebAudio)
+   3) AUDIO ENGINE: MediaElement + WebAudio (mobile-friendly)
    ========================= */
 let ac = null;
 let masterGain = null;
 let limiter = null;
 
-let buffers = [];   // AudioBuffer[]
-let nodes = [];     // {gain, pan, muted, solo}
-let sources = [];   // {src, gainNode, panNode}
+let audioEls = [];   // HTMLAudioElement[]
+let sources = [];    // {el, srcNode, gainNode, panNode}
+let nodes = [];      // {gain, pan, muted, solo}
 
 let isLoaded = false;
 let isLoading = false;
 let isPlaying = false;
 let loopOn = false;
 
-let startAt = 0;    // ac.currentTime - offset
-let offset = 0;     // seconds
-let duration = 0;   // seconds
+let duration = 0;
 let raf = null;
+let syncTimer = null;
 
-/* --- Seek control (scrub sin pelea con el refresco) --- */
+/* --- Seek / Clock --- */
 const seek = $("seek");
 let seeking = false;
 
-function updateClock(t){
+function getMasterEl(){
+  return audioEls[0] || null;
+}
+function getCurrentTime(){
+  const m = getMasterEl();
+  return m ? (m.currentTime || 0) : 0;
+}
+function updateClock(){
+  const t = getCurrentTime();
   const tCur = $("tCur"); if(tCur) tCur.textContent = fmtTime(t);
   const tDur = $("tDur"); if(tDur) tDur.textContent = fmtTime(duration);
   const clock = $("clockBadge"); if(clock) clock.textContent = fmtTime(t) + " / " + fmtTime(duration);
-}
-function getCurrentTime(){
-  if(!isPlaying) return offset;
-  const t = ac.currentTime - startAt;
-  return Math.max(0, Math.min(duration, t));
-}
-function setOffset(newOffset, restartIfPlaying){
-  offset = Math.max(0, Math.min(duration, newOffset));
-  updateClock(offset);
-  if(seek) seek.value = String(offset);
-  if(restartIfPlaying && isPlaying) startPlayback();
-}
-function tick(){
-  const t = getCurrentTime();
-  updateClock(t);
   if(seek && !seeking) seek.value = String(t);
+}
 
-  if(!loopOn && t >= duration - 0.02){
-    stopPlayback();
-    return;
+function setOffsetAll(t){
+  t = Math.max(0, Math.min(duration || 0, t));
+  for(const a of audioEls){
+    try{ a.currentTime = t; }catch(_){}
   }
-  raf = requestAnimationFrame(tick);
+  if(seek) seek.value = String(t);
+  updateClock();
 }
 
 if(seek){
   seek.addEventListener("pointerdown", () => { seeking = true; }, {passive:true});
   window.addEventListener("pointerup", () => { seeking = false; }, {passive:true});
-
   seek.addEventListener("input", () => {
     if(!isLoaded) return;
+    // mientras arrastras, solo actualiza UI (no “pelea” con el tick)
     const v = Number(seek.value);
-    updateClock(v);
+    const tCur = $("tCur"); if(tCur) tCur.textContent = fmtTime(v);
+    const clock = $("clockBadge"); if(clock) clock.textContent = fmtTime(v) + " / " + fmtTime(duration);
   });
-
   seek.addEventListener("change", () => {
     if(!isLoaded) return;
-    setOffset(Number(seek.value), true);
+    setOffsetAll(Number(seek.value));
+    // si está sonando, sigue sonando desde el nuevo punto (sin reiniciar motor)
+    if(isPlaying){
+      for(const a of audioEls){ a.play().catch(()=>{}); }
+    }
   });
 }
 
-/* --- AudioContext + Master + Limiter --- */
+/* --- WebAudio master --- */
 function ensureAudioContext(){
   if(ac) return;
 
   ac = new (window.AudioContext || window.webkitAudioContext)();
 
   masterGain = ac.createGain();
-  masterGain.gain.value = Number($("masterVol")?.value ?? 1.2);
+  masterGain.gain.value = Number($("masterVol")?.value ?? 1.5);
 
-  // Limiter para permitir subir volumen sin distorsión fea
   limiter = ac.createDynamicsCompressor();
-  limiter.threshold.value = -8;
+  limiter.threshold.value = -10;  // más permisivo para subir master
   limiter.knee.value = 0;
   limiter.ratio.value = 20;
   limiter.attack.value = 0.003;
@@ -165,116 +161,140 @@ function ensureAudioContext(){
   }
 }
 
-function decodeArrayBuffer(arr){
-  return new Promise((resolve, reject) => {
-    ac.decodeAudioData(arr, resolve, reject);
-  });
-}
-
-function getConcurrency(){
-  const hc = navigator.hardwareConcurrency || 4;
-  return Math.max(2, Math.min(6, hc - 1));
-}
-
-async function mapLimit(items, limit, workerFn, progressFn){
-  const results = new Array(items.length);
-  let next = 0, done = 0;
-
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while(true){
-      const i = next++;
-      if(i >= items.length) break;
-      results[i] = await workerFn(items[i], i);
-      done++;
-      if(progressFn) progressFn(done, items.length, items[i], i);
-    }
-  });
-
-  await Promise.all(workers);
-  return results;
-}
-
 /* =========================
-   4) CARGA (rápida)
+   4) CARGA (streaming, sin decodificar buffers)
    ========================= */
+function makeAudioEl(url){
+  const a = new Audio();
+  a.src = url;
+  a.preload = "auto";
+  a.crossOrigin = "anonymous";
+  a.loop = false;
+  a.playsInline = true; // iOS
+  return a;
+}
+
+function waitMetadata(a){
+  return new Promise((resolve, reject) => {
+    const onOk = () => cleanup(resolve);
+    const onErr = () => cleanup(() => reject(new Error("Error cargando audio: " + a.src)));
+    const cleanup = (fn) => {
+      a.removeEventListener("loadedmetadata", onOk);
+      a.removeEventListener("error", onErr);
+      fn();
+    };
+    a.addEventListener("loadedmetadata", onOk, { once:true });
+    a.addEventListener("error", onErr, { once:true });
+    // por si ya estaba
+    if(!isNaN(a.duration) && isFinite(a.duration) && a.duration > 0) cleanup(resolve);
+  });
+}
+
 async function loadAll(){
   if(isLoading) return;
   isLoading = true;
 
   try{
+    setStatus("Cargando…");
+    setProgress("Preparando pistas…", 0);
+
+    // parar si está sonando
+    stopPlayback();
+
+    // reset (importante en móvil)
+    audioEls = [];
+    sources = [];
+    nodes = [];
+
     ensureAudioContext();
     if(ac.state === "suspended") await ac.resume();
 
-    setStatus("Cargando…");
-    setProgress("Descargando y preparando audio…", 0);
+    // crear audios y nodos
+    audioEls = TRACKS.map(t => makeAudioEl(t.url));
 
-    // Si estaba sonando, paramos antes de recargar
-    if(isPlaying) stopPlayback();
+    // Progreso por metadata (rápido y fiable en móvil)
+    let done = 0;
+    const total = audioEls.length;
 
-    const limit = getConcurrency();
+    for(let i = 0; i < audioEls.length; i++){
+      const a = audioEls[i];
+      setProgress(`Cargando metadata ${i+1}/${total}: ${TRACKS[i].name}`, Math.round((i/total)*100));
+      await waitMetadata(a);
+      done++;
+      setProgress(`Listo ${done}/${total}: ${TRACKS[i].name}`, Math.round((done/total)*100));
+    }
 
-    const bufs = await mapLimit(
-      TRACKS,
-      limit,
-      async (tr) => {
-        const res = await fetch(tr.url, { cache: "force-cache" });
-        if(!res.ok) throw new Error("No se pudo cargar: " + tr.url + " (HTTP " + res.status + ")");
-        const arr = await res.arrayBuffer();
-        return await decodeArrayBuffer(arr);
-      },
-      (done, total, tr) => {
-        const pct = Math.round((done / total) * 100);
-        setProgress(`Cargadas ${done}/${total}: ${tr.name}`, pct);
-      }
-    );
+    // Duración (tomamos el máximo)
+    duration = Math.max(...audioEls.map(a => a.duration || 0));
 
-    buffers = bufs;
-    duration = Math.max(...buffers.map(b => b.duration));
-    offset = 0;
-
-    // Seek en segundos
     if(seek){
       seek.max = String(duration);
       seek.step = "0.01";
       seek.value = "0";
     }
 
-    isLoaded = true;
+    // Conectar cada audio al grafo WebAudio
+    for(let i = 0; i < audioEls.length; i++){
+      const el = audioEls[i];
+      const srcNode = ac.createMediaElementSource(el);
+      const gainNode = ac.createGain();
+      const panNode = ac.createStereoPanner ? ac.createStereoPanner() : null;
 
+      // estado inicial
+      nodes.push({ gain: 1.0, pan: 0, muted: false, solo: false });
+      gainNode.gain.value = 1.0;
+
+      if(panNode){
+        panNode.pan.value = 0;
+        srcNode.connect(gainNode);
+        gainNode.connect(panNode);
+        panNode.connect(masterGain);
+      } else {
+        srcNode.connect(gainNode);
+        gainNode.connect(masterGain);
+      }
+
+      sources.push({ el, srcNode, gainNode, panNode });
+    }
+
+    // UI
     buildMixerUI();
-    updateClock(0);
 
+    isLoaded = true;
     setStatus("Cargado");
     setProgress("Carga completa.", 100);
+    updateClock();
 
     const small = $("smallInfo"); if(small) small.textContent = "Cargado. Pulsa Reproducir.";
 
-    // Mostrar mixer
     const hero = $("hero");   if(hero) hero.style.display = "none";
     const mixer = $("mixer"); if(mixer) mixer.style.display = "grid";
     const btnReload = $("btnReload"); if(btnReload) btnReload.classList.remove("hidden");
 
-    toast("Pistas cargadas. Usa SOLO para aislar instrumentos.");
+    toast("Pistas cargadas (modo streaming).");
   } finally {
     isLoading = false;
   }
 }
 
 /* =========================
-   5) UI de pistas (1 columna)
+   5) UI pistas (1 columna + controles live)
    ========================= */
 function buildMixerUI(){
   const wrap = $("tracks");
   if(!wrap) return;
 
+  // fuerza 1 columna incluso si el CSS se pisa
+  wrap.style.display = "grid";
+  wrap.style.gridTemplateColumns = "1fr";
+  wrap.style.gap = "12px";
+
   wrap.innerHTML = "";
-  nodes = [];
 
   for(let i = 0; i < TRACKS.length; i++){
     const tr = TRACKS[i];
     const card = document.createElement("div");
     card.className = "track";
-
     card.innerHTML = `
       <div class="trackTop">
         <div class="trackName">${tr.name}</div>
@@ -284,7 +304,7 @@ function buildMixerUI(){
       <div class="controls">
         <div class="controlRow">
           <label><img class="iconSm" src="assets/icons/vol.svg" alt="">Vol</label>
-          <input class="slider" data-kind="vol" data-i="${i}" type="range" min="0" max="2" step="0.01" value="1.0" />
+          <input class="slider" data-kind="vol" data-i="${i}" type="range" min="0" max="3" step="0.01" value="1.0" />
         </div>
 
         <div class="controlRow">
@@ -302,27 +322,22 @@ function buildMixerUI(){
         </div>
       </div>
     `;
-
     wrap.appendChild(card);
-
-    nodes.push({ gain: 1.0, pan: 0, muted: false, solo: false });
   }
 
-  // Sliders
+  // sliders
   wrap.querySelectorAll("input[data-kind]").forEach(el => {
     el.addEventListener("input", (e) => {
       const i = Number(e.target.dataset.i);
       const kind = e.target.dataset.kind;
       const v = Number(e.target.value);
-
       if(kind === "vol") nodes[i].gain = v;
       if(kind === "pan") nodes[i].pan = v;
-
       applyMixLive();
     });
   });
 
-  // Botones: OJO, usamos currentTarget (si pulsas el icono, sigue funcionando)
+  // botones (currentTarget para que funcione aunque pulses el icono)
   wrap.querySelectorAll("button[data-kind]").forEach(btn => {
     btn.addEventListener("click", (e) => {
       const el = e.currentTarget;
@@ -336,14 +351,13 @@ function buildMixerUI(){
         nodes[i].solo = !nodes[i].solo;
         el.classList.toggle("on", nodes[i].solo);
       }
-
       applyMixLive();
     });
   });
 }
 
 /* =========================
-   6) Mezcla en vivo
+   6) Mezcla live (gain/pan)
    ========================= */
 function computeAudible(i){
   const anySolo = nodes.some(n => n.solo);
@@ -356,109 +370,114 @@ function applyMixLive(){
 
   for(let i = 0; i < sources.length; i++){
     const s = sources[i];
-    if(!s) continue;
-
     const audible = computeAudible(i);
     const g = audible ? nodes[i].gain : 0.0;
 
-    try{
-      s.gainNode.gain.cancelScheduledValues(ac.currentTime);
-      s.gainNode.gain.setTargetAtTime(g, ac.currentTime, 0.02);
+    s.gainNode.gain.cancelScheduledValues(ac.currentTime);
+    s.gainNode.gain.setTargetAtTime(g, ac.currentTime, 0.02);
 
-      if(s.panNode){
-        s.panNode.pan.cancelScheduledValues(ac.currentTime);
-        s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
-      }
-    }catch(_){}
+    if(s.panNode){
+      s.panNode.pan.cancelScheduledValues(ac.currentTime);
+      s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
+    }
   }
 }
 
 /* =========================
-   7) Transporte
+   7) Transporte (play/pause/stop/loop) + sync guard
    ========================= */
-function stopSources(){
-  for(const s of sources){
-    if(!s) continue;
-    try{ s.src.stop(0); }catch(_){}
-    try{ s.src.disconnect(); }catch(_){}
-    try{ s.gainNode.disconnect(); }catch(_){}
-    try{ if(s.panNode) s.panNode.disconnect(); }catch(_){}
-  }
-  sources = [];
+function clearTimers(){
+  if(raf) cancelAnimationFrame(raf);
+  raf = null;
+  if(syncTimer) clearInterval(syncTimer);
+  syncTimer = null;
 }
 
-function startPlayback(){
-  if(!isLoaded) return;
+function tick(){
+  updateClock();
+  raf = requestAnimationFrame(tick);
+}
+
+function startSyncGuard(){
+  // corrige drift en móvil cada 400ms (solo si se desincroniza >80ms)
+  syncTimer = setInterval(() => {
+    if(!isPlaying) return;
+    const m = getMasterEl();
+    if(!m) return;
+    const t = m.currentTime || 0;
+    for(let i = 1; i < audioEls.length; i++){
+      const a = audioEls[i];
+      const d = Math.abs((a.currentTime || 0) - t);
+      if(d > 0.08){
+        try{ a.currentTime = t; }catch(_){}
+      }
+    }
+  }, 400);
+}
+
+async function startPlayback(){
+  if(!isLoaded) { toast("Primero pulsa “Entrar y cargar pistas”."); return; }
   ensureAudioContext();
-  if(ac.state === "suspended") ac.resume();
+  if(ac.state === "suspended") await ac.resume();
 
-  stopSources();
-  sources = [];
+  // al iniciar, alineamos todas
+  const t = Number(seek?.value ?? 0);
+  setOffsetAll(t);
 
-  const when = ac.currentTime + 0.08;
-  startAt = when - offset;
+  // play todas
+  const plays = audioEls.map(a => a.play().catch(err => err));
+  const results = await Promise.all(plays);
 
-  for(let i = 0; i < buffers.length; i++){
-    const buf = buffers[i];
-
-    const src = ac.createBufferSource();
-    src.buffer = buf;
-    src.loop = loopOn;
-    if(loopOn){
-      src.loopStart = 0;
-      src.loopEnd = duration;
-    }
-
-    const gainNode = ac.createGain();
-    const panNode = (ac.createStereoPanner) ? ac.createStereoPanner() : null;
-
-    const audible = computeAudible(i);
-    gainNode.gain.value = audible ? nodes[i].gain : 0.0;
-
-    if(panNode){
-      panNode.pan.value = nodes[i].pan;
-      src.connect(gainNode);
-      gainNode.connect(panNode);
-      panNode.connect(masterGain);
-    } else {
-      src.connect(gainNode);
-      gainNode.connect(masterGain);
-    }
-
-    const startOffset = Math.min(offset, Math.max(0, buf.duration - 0.001));
-    src.start(when, startOffset);
-
-    sources.push({ src, gainNode, panNode });
+  // si alguna falló en iOS por gesto, lo avisamos
+  const anyFail = results.some(r => r instanceof Error);
+  if(anyFail){
+    toast("En móvil, si no suena: vuelve a pulsar Reproducir (iOS exige gesto).");
   }
 
   isPlaying = true;
   setStatus("Reproduciendo");
-  applyMixLive();
+  clearTimers();
   tick();
+  startSyncGuard();
+
+  // loop: cuando termina la master
+  const m = getMasterEl();
+  if(m){
+    m.onended = () => {
+      if(loopOn){
+        setOffsetAll(0);
+        startPlayback();
+      } else {
+        stopPlayback();
+      }
+    };
+  }
 }
 
 function pausePlayback(){
   if(!isLoaded || !isPlaying) return;
-  offset = getCurrentTime();
-  stopSources();
+  for(const a of audioEls){ try{ a.pause(); }catch(_){ } }
   isPlaying = false;
   setStatus("En pausa");
-  if(raf) cancelAnimationFrame(raf);
+  clearTimers();
+  updateClock();
 }
 
 function stopPlayback(){
-  if(!isLoaded) return;
-  stopSources();
+  if(!isLoaded && audioEls.length === 0) return;
+  for(const a of audioEls){
+    try{ a.pause(); }catch(_){}
+    try{ a.currentTime = 0; }catch(_){}
+  }
   isPlaying = false;
-  offset = 0;
   setStatus("Detenido");
-  updateClock(0);
+  clearTimers();
   if(seek) seek.value = "0";
-  if(raf) cancelAnimationFrame(raf);
+  updateClock();
 }
 
 /* =========================
-   8) Botones + Tips
+   8) Botones
    ========================= */
 $("btnEnter")?.addEventListener("click", async () => {
   try{
@@ -466,8 +485,8 @@ $("btnEnter")?.addEventListener("click", async () => {
   }catch(e){
     console.error(e);
     setStatus("Error de carga");
-    setProgress("Error. Revisa el hosting y rutas.", 0);
-    toast("Error cargando audios. Comprueba que existe la carpeta 'audio/' y los nombres exactos.");
+    setProgress("Error. Revisa rutas en /audio/.", 0);
+    toast("Error cargando pistas. Comprueba carpeta /audio/ y nombres exactos.");
   }
 });
 
@@ -477,26 +496,22 @@ $("btnReload")?.addEventListener("click", async () => {
     toast("Pistas recargadas.");
   }catch(e){
     console.error(e);
-    toast("No se pudieron recargar las pistas.");
+    toast("No se pudieron recargar.");
   }
 });
 
-$("btnPlay")?.addEventListener("click", () => {
-  if(!isLoaded){ toast("Primero pulsa “Entrar y cargar pistas”."); return; }
-  startPlayback();
-});
-$("btnPause")?.addEventListener("click", pausePlayback);
-$("btnStop")?.addEventListener("click", stopPlayback);
+$("btnPlay")?.addEventListener("click", () => startPlayback());
+$("btnPause")?.addEventListener("click", () => pausePlayback());
+$("btnStop")?.addEventListener("click", () => stopPlayback());
 
 $("btnLoop")?.addEventListener("click", () => {
   loopOn = !loopOn;
   const lb = $("loopBadge"); if(lb) lb.textContent = "Loop: " + (loopOn ? "ON" : "OFF");
-  if(isPlaying) startPlayback();
+  toast("Loop " + (loopOn ? "activado" : "desactivado"));
 });
 
 $("btnResetMix")?.addEventListener("click", () => {
   if(!isLoaded) return;
-
   nodes.forEach(n => { n.gain = 1.0; n.pan = 0; n.muted = false; n.solo = false; });
 
   document.querySelectorAll("input[data-kind='vol']").forEach(el => el.value = "1.0");
@@ -508,7 +523,9 @@ $("btnResetMix")?.addEventListener("click", () => {
   toast("Mezcla reiniciada.");
 });
 
-// Tips overlay
+/* =========================
+   9) Tips overlay
+   ========================= */
 function openTips(){
   const o = $("tipsOverlay");
   if(!o) return;
@@ -521,10 +538,10 @@ function closeTips(){
   o.classList.remove("on");
   o.setAttribute("aria-hidden","true");
 }
-$("btnTips")?.addEventListener("click", openTips);
-$("btnCloseTips")?.addEventListener("click", closeTips);
+$("btnTips")?.addEventListener("click", () => openTips());
+$("btnCloseTips")?.addEventListener("click", () => closeTips());
 $("tipsOverlay")?.addEventListener("click", (e) => {
-  if(e.target && e.target.id === "tipsOverlay") closeTips();
+  if (e.target && e.target.id === "tipsOverlay") closeTips();
 });
-window.addEventListener("keydown", (e) => { if(e.key === "Escape") closeTips(); });
+window.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeTips(); });
 </script>
