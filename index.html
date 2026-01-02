@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Et Flagellavit — Mezclador de pistas</title>
+  <meta name="description" content="Mezclador interactivo de pistas (stems) para estudio auditivo." />
+    <style>
+    :root{
+      --gold:#d8b27a;
+      --gold2:#f3d6a4;
+      --bronze:#b78a4f;
+      --blood:#7a1f1a;
+      --ink:#0b0a07;
+      --ink2:#120f0b;
+      --glass: rgba(12,10,7,0.62);
+      --glass2: rgba(12,10,7,0.42);
+      --stroke: rgba(243,214,164,0.22);
+      --stroke2: rgba(255,255,255,0.10);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.72);
+      --shadow: 0 18px 60px rgba(0,0,0,0.55);
+      --radius: 18px;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color:var(--text);
+      background: #070605;
+      overflow-x:hidden;
+    }
+
+    /* Fondo cinematográfico: portada a pantalla completa */
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      background-image:url("assets/cover.png");
+      background-size:cover;
+      background-position:center;
+      filter: contrast(1.05) saturate(1.02);
+      transform: scale(1.06);
+      z-index:-3;
+    }
+    /* Velo + viñeta + luces */
+    body::after{
+      content:"";
+      position:fixed; inset:0;
+      z-index:-2;
+      pointer-events:none;
+      background:
+        radial-gradient(900px 560px at 16% 22%, rgba(216,178,122,0.18), transparent 60%),
+        radial-gradient(800px 520px at 82% 18%, rgba(122,31,26,0.16), transparent 62%),
+        radial-gradient(900px 700px at 50% 92%, rgba(35,55,120,0.13), transparent 62%),
+        linear-gradient(180deg, rgba(5,5,8,0.70), rgba(5,5,8,0.88));
+    }
+    /* Grano sutil */
+    .grain{
+      position:fixed; inset:-40px;
+      z-index:-1; pointer-events:none;
+      opacity:0.10;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+      mix-blend-mode: overlay;
+    }
+
+    .wrap{max-width:1150px; margin:0 auto; padding: 18px 16px 40px}
+    a{color:inherit}
+
+    header{
+      position:sticky; top:0; z-index:30;
+      backdrop-filter: blur(14px);
+      background: linear-gradient(180deg, rgba(7,6,5,0.72), rgba(7,6,5,0.30));
+      border-bottom:1px solid rgba(243,214,164,0.14);
+    }
+    .topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:14px;
+      padding:12px 8px;
+    }
+    .brand{display:flex; gap:12px; align-items:center; min-width:0;}
+    .sigil{
+      width:42px; height:42px; flex:0 0 auto;
+      background: radial-gradient(circle at 30% 25%, rgba(243,214,164,0.85), rgba(216,178,122,0.30) 62%, rgba(0,0,0,0) 70%),
+                  url("assets/icons/favicon.svg");
+      background-size: cover;
+      border-radius: 14px;
+      border:1px solid rgba(243,214,164,0.20);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.40);
+    }
+    h1{
+      margin:0;
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      font-weight:800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-size: 18px;
+      line-height:1.1;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .sub{
+      font-size:12px;
+      color: var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .actions{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end}
+    .badge{
+      padding:7px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid rgba(243,214,164,0.18);
+      background: linear-gradient(180deg, rgba(12,10,7,0.55), rgba(12,10,7,0.28));
+      color: rgba(255,255,255,0.88);
+      backdrop-filter: blur(12px);
+    }
+
+    main{display:grid; gap:16px; padding-top: 10px;}
+
+    .card{
+      border-radius: var(--radius);
+      border:1px solid rgba(243,214,164,0.18);
+      background: linear-gradient(180deg, var(--glass), var(--glass2));
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      backdrop-filter: blur(14px);
+    }
+
+    /* HERO */
+    .hero{
+      min-height: 64vh;
+      display:grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap:14px;
+      align-items:stretch;
+    }
+    @media (max-width: 960px){
+      .hero{grid-template-columns: 1fr; min-height:auto;}
+    }
+
+    .cover{
+      position:relative;
+      padding: 26px 24px 22px;
+    }
+    .cover::before{
+      content:"";
+      position:absolute; inset:0;
+      background:
+        radial-gradient(900px 520px at 25% 10%, rgba(243,214,164,0.18), transparent 60%),
+        linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.35));
+      pointer-events:none;
+    }
+
+    .title{
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      font-weight: 800;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      font-size: clamp(28px, 4.2vw, 54px);
+      margin: 0 0 10px 0;
+      text-shadow: 0 10px 35px rgba(0,0,0,0.55);
+    }
+    .lead{
+      margin:0;
+      max-width: 62ch;
+      color: rgba(255,255,255,0.86);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .divider{
+      width:min(520px, 100%);
+      height:auto;
+      margin: 16px 0 14px;
+      opacity: 0.95;
+    }
+
+    .ctaRow{display:flex; gap:10px; flex-wrap:wrap; margin-top: 14px}
+    .btn{
+      appearance:none;
+      border:none;
+      cursor:pointer;
+      user-select:none;
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.92);
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+      border:1px solid rgba(243,214,164,0.16);
+      box-shadow: 0 12px 26px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+    .btn:hover{transform: translateY(-1px); border-color: rgba(243,214,164,0.28); box-shadow: 0 18px 36px rgba(0,0,0,0.45);}
+    .btn:active{transform: translateY(0px) scale(0.99)}
+    .btn .icon{width:20px; height:20px; display:block; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));}
+
+    .btn.primary{
+      color: #190d08;
+      background: linear-gradient(135deg, rgba(243,214,164,0.98), rgba(216,178,122,0.92));
+      border:1px solid rgba(243,214,164,0.55);
+    }
+    .btn.ghost{background: linear-gradient(180deg, rgba(10,10,14,0.30), rgba(10,10,14,0.18));}
+    .btn.danger{
+      background: linear-gradient(135deg, rgba(164,48,44,0.92), rgba(122,31,26,0.92));
+      border-color: rgba(243,214,164,0.22);
+    }
+
+    .btn.small{
+      padding:10px 12px;
+      border-radius: 14px;
+      font-size: 11px;
+    }
+    .btn.hidden{display:none !important;}
+
+    .info{padding:16px 16px 14px}
+    .kpis{display:grid; grid-template-columns: repeat(3, 1fr); gap:10px}
+    @media (max-width: 960px){ .kpis{grid-template-columns: 1fr;}}
+    .kpi{
+      border-radius: 16px;
+      border:1px solid rgba(243,214,164,0.14);
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
+      padding: 12px 12px;
+    }
+    .kpi .v{font-weight:800; font-size:14px; font-family: Cinzel, ui-serif, Georgia, serif; letter-spacing:.05em;}
+    .kpi .l{font-size:12px; color: rgba(255,255,255,0.74); margin-top:4px}
+
+    .progressWrap{margin-top:14px}
+    .progressTop{display:flex; justify-content:space-between; gap:10px; font-size:12px; color:rgba(255,255,255,0.80)}
+    .bar{height:10px; background: rgba(255,255,255,0.08); border:1px solid rgba(243,214,164,0.14); border-radius:999px; overflow:hidden; margin-top:8px}
+    #progressBar{height:100%; width:0%; background: linear-gradient(90deg, rgba(243,214,164,0.95), rgba(122,31,26,0.65), rgba(243,214,164,0.95));}
+
+    .hint{
+      margin-top: 12px;
+      border-left: 3px solid rgba(243,214,164,0.55);
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.20);
+      color: rgba(255,255,255,0.80);
+      font-size: 13px;
+      line-height:1.5;
+    }
+
+    /* MIXER */
+    .mixer{display:none}
+    .panel{padding: 16px}
+    .panelHeader{
+      display:flex; align-items:flex-start; justify-content:space-between;
+      gap:10px; margin-bottom: 12px;
+    }
+    .panelHeader h2{
+      margin:0;
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 16px;
+    }
+    .small{font-size:12px; color:rgba(255,255,255,0.75); margin-top:4px}
+    .transport{
+      display:grid;
+      gap:10px;
+      border: 1px solid rgba(243,214,164,0.12);
+      border-radius: 18px;
+      padding: 12px;
+      background: rgba(0,0,0,0.18);
+      margin-bottom: 12px;
+    }
+    .transportRow{
+      display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    }
+    .transportRow .btn{font-family: Cinzel, ui-serif, Georgia, serif;}
+    .seekWrap{flex:1 1 260px; min-width: 220px}
+    .seekTop{display:flex; justify-content:space-between; font-size:12px; color:rgba(255,255,255,0.75)}
+    .seek{
+      width:100%;
+      margin-top:8px;
+    }
+    input[type="range"]{accent-color: var(--gold2);}
+    .controlRow{
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+      font-size: 12px;
+      color: rgba(255,255,255,0.78);
+    }
+    .controlRow label{
+      min-width: 70px;
+      display:flex; align-items:center; gap:8px;
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      font-size: 11px;
+      opacity: .95;
+    }
+    .iconSm{width:18px; height:18px; display:block; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));}
+    .slider{flex: 1 1 220px}
+
+    .tracks{display:grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px}
+    @media (max-width: 960px){ .tracks{grid-template-columns: 1fr;}}
+
+    .track{
+      border-radius: 18px;
+      border:1px solid rgba(243,214,164,0.14);
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
+      padding: 12px;
+      box-shadow: 0 10px 22px rgba(0,0,0,0.28);
+      position:relative;
+      overflow:hidden;
+    }
+    .track::before{
+      content:"";
+      position:absolute; inset:0;
+      background:
+        radial-gradient(700px 320px at 20% 0%, rgba(243,214,164,0.10), transparent 55%),
+        linear-gradient(90deg, rgba(243,214,164,0.18), transparent 28%);
+      opacity: .85;
+      pointer-events:none;
+    }
+    .trackTop{display:flex; justify-content:space-between; gap:10px; position:relative}
+    .trackName{
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      font-weight: 800;
+      font-size: 13px;
+    }
+    .pill{
+      font-size:11px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(243,214,164,0.16);
+      background: rgba(0,0,0,0.18);
+      color: rgba(255,255,255,0.78);
+      white-space:nowrap;
+    }
+    .controls{margin-top:10px; display:grid; gap:10px; position:relative}
+    .btnRow{display:flex; gap:8px; flex-wrap:wrap}
+    .btnMini{
+      padding:9px 12px;
+      border-radius: 14px;
+      font-size: 11px;
+      background: rgba(0,0,0,0.20);
+      border:1px solid rgba(243,214,164,0.14);
+      text-transform: uppercase;
+    }
+    .btnMini.on{
+      background: linear-gradient(135deg, rgba(243,214,164,0.92), rgba(216,178,122,0.86));
+      color: #1b0c06;
+      border-color: rgba(243,214,164,0.55);
+    }
+
+    footer{
+      margin-top: 18px;
+      padding: 10px 6px;
+      color: rgba(255,255,255,0.65);
+      font-size: 12px;
+      text-align:center;
+    }
+
+    .toast{
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(243,214,164,0.18);
+      padding: 10px 14px;
+      border-radius: 14px;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.55);
+      display:none;
+      max-width: min(780px, calc(100vw - 28px));
+      backdrop-filter: blur(12px);
+      color: rgba(255,255,255,0.90);
+    }
+
+    /* Overlay Tips (estilo Genially) */
+    .overlay{
+      position:fixed; inset:0;
+      display:none;
+      z-index: 50;
+      padding: 24px 16px;
+      background: rgba(0,0,0,0.72);
+      backdrop-filter: blur(10px);
+    }
+    .overlay.on{display:grid; place-items:center;}
+    .modal{
+      width: min(860px, 100%);
+      border-radius: 22px;
+      border: 1px solid rgba(243,214,164,0.22);
+      background: linear-gradient(180deg, rgba(12,10,7,0.78), rgba(12,10,7,0.52));
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      position:relative;
+    }
+    .modalHeader{
+      display:flex; justify-content:space-between; align-items:center;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(243,214,164,0.14);
+      background: rgba(0,0,0,0.18);
+    }
+    .modalHeader h3{
+      margin:0;
+      font-family: Cinzel, ui-serif, Georgia, serif;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      font-size: 14px;
+    }
+    .modalBody{padding: 14px 16px 18px; color: rgba(255,255,255,0.86); line-height:1.6;}
+    .modalBody ul{margin: 10px 0 0 18px; padding:0}
+    .modalBody li{margin: 6px 0}
+  
+    /* --- ENTRADA ANIMADA (estilo Genially/Canva) --- */
+    .js body:not(.is-ready) .anim-in{
+      opacity: 0;
+      transform: translateY(14px) scale(0.992);
+      filter: blur(14px);
+    }
+    .js body.is-ready .anim-in{
+      opacity: 1;
+      transform: none;
+      filter: blur(0);
+      transition:
+        opacity 1200ms cubic-bezier(.2,.8,.2,1),
+        transform 1200ms cubic-bezier(.2,.8,.2,1),
+        filter 1200ms cubic-bezier(.2,.8,.2,1);
+      will-change: opacity, transform, filter;
+    }
+    .js body.is-ready .delay-1{ transition-delay: 80ms; }
+    .js body.is-ready .delay-2{ transition-delay: 160ms; }
+    .js body.is-ready .delay-3{ transition-delay: 240ms; }
+    .js body.is-ready .delay-4{ transition-delay: 320ms; }
+
+
+  </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg">
+  <script>document.documentElement.classList.add('js');</script>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+<div class="wrap">
+  <header class="anim-in delay-1">
+    <div class="topbar">
+      <div class="brand">
+        <div class="sigil" aria-hidden="true"></div>
+        <div style="min-width:0">
+          <h1>Et Flagellavit</h1>
+          <div class="sub">Mezclador didáctico de pistas (stems)</div>
+        </div>
+      </div>
+      <div class="actions">
+        <div class="badge" id="statusBadge">Listo para iniciar</div>
+        <button class="btn small ghost hidden" id="btnReload" title="Recargar pistas">
+          <img class="icon" src="assets/icons/load.svg" alt="">
+          Recargar
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero anim-in delay-2" id="hero">
+      <div class="card cover">
+        <div class="coverContent">
+          <h2 class="title">Et Flagellavit</h2>
+          <img class="divider" src="assets/icons/divider.svg" alt="" />
+          <p class="lead">
+            Escucha, aísla y reconoce cada voz instrumental. Entra, espera a que cargue y mezcla a voluntad:
+            volumen, panorama, mute y solo por pista.
+          </p>
+          <div class="ctaRow">
+            <button class="btn primary" id="btnEnter"><img class="icon" src="assets/icons/load.svg" alt="">Entrar y cargar pistas</button>
+            <button class="btn ghost" id="btnTips"><img class="icon" src="assets/icons/tips.svg" alt="">Consejos de uso</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card info">
+<div class="progressWrap">
+          <div class="progressTop">
+            <div id="progressText">Pulsa “Entrar y cargar pistas”.</div>
+            <div id="progressPct">0%</div>
+          </div>
+          <div class="bar"><div id="progressBar"></div></div>
+        </div>
+
+        <div class="hint">
+          Aplicación diseñada para estudiar y preparar esta obra. Permite un total control de qué pista/instrumento suena en cada momento, modificando el volumen y paneo para resaltar o enmascarar las diferentes voces instrumentales.
+        </div>
+      </div>
+    </section>
+
+    <section class="mixer anim-in delay-3" id="mixer">
+      <div class="card panel">
+        <div class="panelHeader">
+          <div>
+            <h2>Transporte</h2>
+            <div class="small" id="smallInfo">Cargado. Pulsa Reproducir.</div>
+          </div>
+          <div class="badge" id="clockBadge">00:00 / 00:00</div>
+        </div>
+
+        <div class="transport">
+          <div class="transportRow">
+            <button class="btn primary" id="btnPlay"><img class="icon" src="assets/icons/play.svg" alt="">Reproducir</button>
+            <button class="btn" id="btnPause"><img class="icon" src="assets/icons/pause.svg" alt="">Pausa</button>
+            <button class="btn danger" id="btnStop"><img class="icon" src="assets/icons/stop.svg" alt="">Stop</button>
+            <button class="btn" id="btnResetMix"><img class="icon" src="assets/icons/reset.svg" alt="">Reset mezcla</button>
+            <span class="badge" id="loopBadge">Loop: OFF</span>
+            <button class="btn" id="btnLoop">Alternar loop</button>
+          </div>
+
+          <div>
+            <input class="slider" id="seek" type="range" min="0" max="1000" value="0" />
+            <div class="timeRow">
+              <span id="tCur">00:00</span>
+              <span id="tDur">00:00</span>
+            </div>
+          </div>
+
+          <div class="controlRow">
+            <label for="masterVol"><img class="iconSm" src="assets/icons/vol.svg" alt="">Master</label>
+            <input class="slider" id="masterVol" type="range" min="0" max="1" step="0.01" value="0.9" />
+          </div>
+        </div>
+
+        <div class="tracks" id="tracks"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="anim-in delay-4">
+    Creado por José Carlos Piñar Fuentes para la A.M. Ntro. Padre Jesús Cautivo de Cazorla (Jaén)
+  </footer>
+</div>
+
+<div class="overlay" id="tipsOverlay" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tipsTitle">
+    <div class="modalHeader">
+      <h3 id="tipsTitle">Consejos de escucha y estudio</h3>
+      <button class="btn small ghost" id="btnCloseTips">
+        <img class="icon" src="assets/icons/stop.svg" alt="">
+        Cerrar
+      </button>
+    </div>
+    <div class="modalBody">
+      <p style="margin:0 0 10px 0;">
+        Sugerencia de trabajo (progresivo): aísla, compara e intégrate en cada voz. El oído aprenderá a localizar timbre, función y balance, esto hará que desafines menos.
+      </p>
+      <ul>
+        <li><b>Toca encima</b>, primero con tu instrumento activo y luego desactívalo para sentir tu aporte a la mezcla.</li>
+        <li><b>Añade pistas</b>: entrena la importancia de nuestra voz en cada momento.</li>
+        <li>Juega con el paneo (<b>“Pan”</b>): ubica espacialmente cada voz y mejora la separación auditiva.</li>
+        <li>Vuelve a la <b>mezcla completa</b> e intenta simular que estás en la banda.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // Marca el documento como listo para disparar la animación de entrada
+  (function(){
+    const markReady = () => requestAnimationFrame(() => document.body.classList.add('is-ready'));
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markReady, { once:true });
+    else markReady();
+  })();
+
+  const TRACKS = [{"name": "BOMBARDINO 1", "url": "audio/01_BOMBARDINO_1.mp3"}, {"name": "BOMBARDINO 2", "url": "audio/02_BOMBARDINO_2.mp3"}, {"name": "BOMBO Y PLATOS", "url": "audio/03_BOMBO_Y_PLATOS.mp3"}, {"name": "CAJA", "url": "audio/04_CAJA.mp3"}, {"name": "CORNETA", "url": "audio/05_CORNETA.mp3"}, {"name": "CUERDAS", "url": "audio/06_CUERDAS.mp3"}, {"name": "PERCU AUXILIAR", "url": "audio/07_PERCU_AUXILIAR.mp3"}, {"name": "TAMBOR DESTEMPLADO", "url": "audio/08_TAMBOR_DESTEMPLADO.mp3"}, {"name": "TAMBORES", "url": "audio/09_TAMBORES.mp3"}, {"name": "TROMBÓN 1", "url": "audio/10_TROMBON_1.mp3"}, {"name": "TROMBON 2", "url": "audio/11_TROMBON_2.mp3"}, {"name": "TROMPETA 1", "url": "audio/12_TROMPETA_1.mp3"}, {"name": "TROMPETA 2", "url": "audio/13_TROMPETA_2.mp3"}, {"name": "TROMPETA 3", "url": "audio/14_TROMPETA_3.mp3"}, {"name": "TUBA", "url": "audio/15_TUBA.mp3"}];
+
+  // --- UI helpers ---
+  const $ = (id) => document.getElementById(id);
+  const toastEl = $("toast");
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.style.display = "block";
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(() => toastEl.style.display = "none", 4200);
+  }
+  function fmtTime(sec) {
+    sec = Math.max(0, sec || 0);
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+  }
+
+  // --- Audio engine ---
+  let ac = null;
+  let masterGain = null;
+  let buffers = [];            // AudioBuffer[]
+  let nodes = [];              // {gain, pan, muted, solo}
+  let sources = [];            // currently playing sources
+  let isLoaded = false;
+  let isPlaying = false;
+  let loopOn = false;
+
+  let startAt = 0;             // ac.currentTime when playback started
+  let offset = 0;              // seconds into track when playback starts
+  let duration = 0;            // seconds (max of buffers)
+  let raf = null;
+
+  const seek = $("seek");
+  seek.addEventListener("input", () => {
+    if (!isLoaded) return;
+    const v = Number(seek.value) / 1000;
+    const newOffset = v * duration;
+    $("tCur").textContent = fmtTime(newOffset);
+    $("clockBadge").textContent = fmtTime(newOffset) + " / " + fmtTime(duration);
+  });
+  seek.addEventListener("change", () => {
+    if (!isLoaded) return;
+    const v = Number(seek.value) / 1000;
+    const newOffset = v * duration;
+    setOffset(newOffset, true);
+  });
+
+  function ensureAudioContext() {
+    if (ac) return;
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = ac.createGain();
+    masterGain.gain.value = Number($("masterVol").value);
+    masterGain.connect(ac.destination);
+    $("masterVol").addEventListener("input", (e) => {
+      if (!masterGain) return;
+      masterGain.gain.value = Number(e.target.value);
+    });
+  }
+
+  async function loadAll() {
+    ensureAudioContext();
+    $("statusBadge").textContent = "Cargando…";
+    $("progressText").textContent = "Descargando y preparando audio…";
+    $("progressPct").textContent = "0%";
+    $("progressBar").style.width = "0%";
+
+    const bufs = [];
+    for (let i = 0; i < TRACKS.length; i++) {
+      const tr = TRACKS[i];
+      $("progressText").textContent = "Cargando: " + tr.name;
+      const res = await fetch(tr.url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const arr = await res.arrayBuffer();
+      const buf = await ac.decodeAudioData(arr);
+      bufs.push(buf);
+
+      const pct = Math.round(((i + 1) / TRACKS.length) * 100);
+      $("progressPct").textContent = pct + "%";
+      $("progressBar").style.width = pct + "%";
+    }
+
+    buffers = bufs;
+    duration = Math.max(...buffers.map(b => b.duration));
+    isLoaded = true;
+
+    buildMixerUI();
+
+    $("statusBadge").textContent = "Cargado";
+    $("smallInfo").textContent = "Cargado. Pulsa Reproducir.";
+    $("tDur").textContent = fmtTime(duration);
+    $("clockBadge").textContent = "00:00 / " + fmtTime(duration);
+    $("progressText").textContent = "Carga completa.";
+    $("progressPct").textContent = "100%";
+    $("progressBar").style.width = "100%";
+
+    $("hero").classList.add("hidden");
+    $("mixer").style.display = "grid";
+    $("btnReload").classList.remove("hidden");
+  }
+
+  function buildMixerUI() {
+    const wrap = $("tracks");
+    wrap.innerHTML = "";
+    nodes = [];
+
+    for (let i = 0; i < TRACKS.length; i++) {
+      const tr = TRACKS[i];
+      const card = document.createElement("div");
+      card.className = "track";
+      card.innerHTML = `
+        <div class="trackTop">
+          <div class="trackName">${tr.name}</div>
+          <div class="pill">Pista ${String(i+1).padStart(2,"0")}</div>
+        </div>
+
+        <div class="controls">
+          <div class="controlRow">
+            <label><img class="iconSm" src="assets/icons/vol.svg" alt="">Vol</label>
+            <input class="slider" data-kind="vol" data-i="${i}" type="range" min="0" max="1" step="0.01" value="0.9" />
+          </div>
+
+          <div class="controlRow">
+            <label><img class="iconSm" src="assets/icons/pan.svg" alt="">Pan</label>
+            <input class="slider" data-kind="pan" data-i="${i}" type="range" min="-1" max="1" step="0.01" value="0" />
+          </div>
+
+          <div class="btnRow">
+            <button class="btn btnMini mute" data-kind="mute" data-i="${i}"><img class="iconSm" src="assets/icons/mute.svg" alt="">Mute</button>
+            <button class="btn btnMini solo" data-kind="solo" data-i="${i}"><img class="iconSm" src="assets/icons/solo.svg" alt="">Solo</button>
+          </div>
+        </div>
+      `;
+      wrap.appendChild(card);
+
+      nodes.push({
+        gain: 0.9,
+        pan: 0,
+        muted: false,
+        solo: false,
+      });
+    }
+
+    wrap.querySelectorAll("input[data-kind]").forEach(el => {
+      el.addEventListener("input", (e) => {
+        const i = Number(e.target.dataset.i);
+        const kind = e.target.dataset.kind;
+        const v = Number(e.target.value);
+        if (kind === "vol") nodes[i].gain = v;
+        if (kind === "pan") nodes[i].pan = v;
+        applyMixLive();
+      });
+    });
+
+    wrap.querySelectorAll("button[data-kind]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const i = Number(e.target.dataset.i);
+        const kind = e.target.dataset.kind;
+        if (kind === "mute") {
+          nodes[i].muted = !nodes[i].muted;
+          e.target.classList.toggle("on", nodes[i].muted);
+        }
+        if (kind === "solo") {
+          nodes[i].solo = !nodes[i].solo;
+          e.target.classList.toggle("on", nodes[i].solo);
+        }
+        applyMixLive();
+      });
+    });
+
+    const _kt = $("kpiTracks");
+    if (_kt) _kt.textContent = String(TRACKS.length);
+  }
+
+  function computeAudible(i) {
+    const anySolo = nodes.some(n => n.solo);
+    if (anySolo) return nodes[i].solo;
+    return !nodes[i].muted;
+  }
+
+  function applyMixLive() {
+    for (let i = 0; i < sources.length; i++) {
+      const s = sources[i];
+      if (!s) continue;
+      const audible = computeAudible(i);
+      const g = audible ? nodes[i].gain : 0.0;
+      try {
+        s.gainNode.gain.setTargetAtTime(g, ac.currentTime, 0.02);
+        if (s.panNode) s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
+      } catch (_) {}
+    }
+  }
+
+  function stopSources() {
+    for (const s of sources) {
+      if (!s) continue;
+      try { s.src.stop(0); } catch (_) {}
+      try { s.src.disconnect(); } catch (_) {}
+      try { s.gainNode.disconnect(); } catch (_) {}
+      try { if (s.panNode) s.panNode.disconnect(); } catch (_) {}
+    }
+    sources = [];
+  }
+
+  function startPlayback() {
+    if (!isLoaded) return;
+    ensureAudioContext();
+    if (ac.state === "suspended") ac.resume();
+
+    stopSources();
+    sources = [];
+
+    const when = ac.currentTime + 0.08;
+    startAt = when - offset;
+
+    for (let i = 0; i < buffers.length; i++) {
+      const buf = buffers[i];
+      const src = ac.createBufferSource();
+      src.buffer = buf;
+      src.loop = loopOn;
+      if (loopOn) {
+        src.loopStart = 0;
+        src.loopEnd = duration;
+      }
+
+      const gainNode = ac.createGain();
+      const panNode = (ac.createStereoPanner) ? ac.createStereoPanner() : null;
+
+      const audible = computeAudible(i);
+      gainNode.gain.value = audible ? nodes[i].gain : 0.0;
+
+      if (panNode) {
+        panNode.pan.value = nodes[i].pan;
+        src.connect(gainNode);
+        gainNode.connect(panNode);
+        panNode.connect(masterGain);
+      } else {
+        src.connect(gainNode);
+        gainNode.connect(masterGain);
+      }
+
+      const startOffset = Math.min(offset, Math.max(0, buf.duration - 0.001));
+      src.start(when, startOffset);
+
+      sources.push({ src, gainNode, panNode });
+    }
+
+    isPlaying = true;
+    $("statusBadge").textContent = "Reproduciendo";
+    tick();
+  }
+
+  function pausePlayback() {
+    if (!isLoaded || !isPlaying) return;
+    offset = getCurrentTime();
+    stopSources();
+    isPlaying = false;
+    $("statusBadge").textContent = "En pausa";
+    if (raf) cancelAnimationFrame(raf);
+  }
+
+  function stopPlayback() {
+    if (!isLoaded) return;
+    stopSources();
+    isPlaying = false;
+    offset = 0;
+    $("statusBadge").textContent = "Detenido";
+    updateClock(0);
+    seek.value = 0;
+    if (raf) cancelAnimationFrame(raf);
+  }
+
+  function setOffset(newOffset, restartIfPlaying) {
+    offset = Math.max(0, Math.min(duration, newOffset));
+    updateClock(offset);
+    seek.value = Math.round((offset / duration) * 1000);
+    if (restartIfPlaying && isPlaying) startPlayback();
+  }
+
+  function getCurrentTime() {
+    if (!isPlaying) return offset;
+    const t = ac.currentTime - startAt;
+    return Math.max(0, Math.min(duration, t));
+  }
+
+  function updateClock(t) {
+    $("tCur").textContent = fmtTime(t);
+    $("clockBadge").textContent = fmtTime(t) + " / " + fmtTime(duration);
+  }
+
+  function tick() {
+    const t = getCurrentTime();
+    updateClock(t);
+    seek.value = Math.round((t / duration) * 1000);
+
+    if (!loopOn && t >= duration - 0.02) {
+      stopPlayback();
+      return;
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  // --- Buttons ---
+  $("btnEnter").addEventListener("click", async () => {
+    try {
+      await loadAll();
+      toast("Pistas cargadas. Consejo: usa SOLO para aislar instrumentos.");
+    } catch (e) {
+      console.error(e);
+      $("statusBadge").textContent = "Error de carga";
+      $("progressText").textContent = "Error. Revisa el hosting y rutas.";
+      toast("Error cargando audios. Verifica que el hosting publica la carpeta 'audio/'.");
+    }
+  });
+
+  
+  $("btnReload").addEventListener("click", async () => {
+    try{
+      await loadAll();
+      toast("Pistas recargadas.");
+    }catch(e){
+      console.error(e);
+      toast("No se pudieron recargar las pistas.");
+    }
+  });
+
+  function openTips(){
+    const o = $("tipsOverlay");
+    o.classList.add("on");
+    o.setAttribute("aria-hidden","false");
+  }
+  function closeTips(){
+    const o = $("tipsOverlay");
+    o.classList.remove("on");
+    o.setAttribute("aria-hidden","true");
+  }
+  $("btnTips").addEventListener("click", () => openTips());
+  $("btnCloseTips").addEventListener("click", () => closeTips());
+  $("tipsOverlay").addEventListener("click", (e) => {
+    if (e.target && e.target.id === "tipsOverlay") closeTips();
+  });
+  window.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeTips(); });
+
+$("btnPlay").addEventListener("click", () => {
+    if (!isLoaded) { toast("Primero pulsa “Entrar y cargar pistas”."); return; }
+    startPlayback();
+  });
+  $("btnPause").addEventListener("click", () => pausePlayback());
+  $("btnStop").addEventListener("click", () => stopPlayback());
+
+  $("btnLoop").addEventListener("click", () => {
+    loopOn = !loopOn;
+    $("loopBadge").textContent = "Loop: " + (loopOn ? "ON" : "OFF");
+    if (isPlaying) startPlayback();
+  });
+
+  $("btnResetMix").addEventListener("click", () => {
+    if (!isLoaded) return;
+    nodes.forEach(n => { n.gain = 0.9; n.pan = 0; n.muted = false; n.solo = false; });
+    document.querySelectorAll("input[data-kind='vol']").forEach(el => el.value = "0.9");
+    document.querySelectorAll("input[data-kind='pan']").forEach(el => el.value = "0");
+    document.querySelectorAll("button[data-kind='mute']").forEach(el => el.classList.remove("on"));
+    document.querySelectorAll("button[data-kind='solo']").forEach(el => el.classList.remove("on"));
+    applyMixLive();
+    toast("Mezcla reiniciada.");
+  });
+</script>
+</body>
+</html>
