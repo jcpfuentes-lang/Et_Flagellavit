@@ -1,494 +1,419 @@
-<script>
-  "use strict";
+"use strict";
 
-  // ---------- Config ----------
-  const TRACKS = [{"name": "BOMBARDINO 1", "url": "audio/01_BOMBARDINO_1.mp3"}, {"name": "BOMBARDINO 2", "url": "audio/02_BOMBARDINO_2.mp3"}, {"name": "BOMBO Y PLATOS", "url": "audio/03_BOMBO_Y_PLATOS.mp3"}, {"name": "CAJA", "url": "audio/04_CAJA.mp3"}, {"name": "CORNETA", "url": "audio/05_CORNETA.mp3"}, {"name": "CUERDAS", "url": "audio/06_CUERDAS.mp3"}, {"name": "PERCU AUXILIAR", "url": "audio/07_PERCU_AUXILIAR.mp3"}, {"name": "TAMBOR DESTEMPLADO", "url": "audio/08_TAMBOR_DESTEMPLADO.mp3"}, {"name": "TAMBORES", "url": "audio/09_TAMBORES.mp3"}, {"name": "TROMBÓN 1", "url": "audio/10_TROMBON_1.mp3"}, {"name": "TROMBON 2", "url": "audio/11_TROMBON_2.mp3"}, {"name": "TROMPETA 1", "url": "audio/12_TROMPETA_1.mp3"}, {"name": "TROMPETA 2", "url": "audio/13_TROMPETA_2.mp3"}, {"name": "TROMPETA 3", "url": "audio/14_TROMPETA_3.mp3"}, {"name": "TUBA", "url": "audio/15_TUBA.mp3"}];
+// ---------- Config ----------
+const TRACKS = [{"name":"BOMBARDINO 1","url":"audio/01_BOMBARDINO_1.mp3"},{"name":"BOMBARDINO 2","url":"audio/02_BOMBARDINO_2.mp3"},{"name":"BOMBO Y PLATOS","url":"audio/03_BOMBO_Y_PLATOS.mp3"},{"name":"CAJA","url":"audio/04_CAJA.mp3"},{"name":"CORNETA","url":"audio/05_CORNETA.mp3"},{"name":"CUERDAS","url":"audio/06_CUERDAS.mp3"},{"name":"PERCU AUXILIAR","url":"audio/07_PERCU_AUXILIAR.mp3"},{"name":"TAMBOR DESTEMPLADO","url":"audio/08_TAMBOR_DESTEMPLADO.mp3"},{"name":"TAMBORES","url":"audio/09_TAMBORES.mp3"},{"name":"TROMBÓN 1","url":"audio/10_TROMBON_1.mp3"},{"name":"TROMBON 2","url":"audio/11_TROMBON_2.mp3"},{"name":"TROMPETA 1","url":"audio/12_TROMPETA_1.mp3"},{"name":"TROMPETA 2","url":"audio/13_TROMPETA_2.mp3"},{"name":"TROMPETA 3","url":"audio/14_TROMPETA_3.mp3"},{"name":"TUBA","url":"audio/15_TUBA.mp3"}];
 
-  // ---------- Helpers ----------
-  const $ = (id) => document.getElementById(id);
+// ---------- Helpers ----------
+const $ = (id) => document.getElementById(id);
 
-  const toastEl = $("toast");
-  function toast(msg) {
-    if (!toastEl) return;
-    toastEl.textContent = msg;
-    toastEl.style.display = "block";
-    clearTimeout(window.__toastTimer);
-    window.__toastTimer = setTimeout(() => (toastEl.style.display = "none"), 4200);
-  }
+const toastEl = $("toast");
+function toast(msg){
+  if(!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.style.display = "block";
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(()=>toastEl.style.display="none", 4200);
+}
+function fmtTime(sec){
+  sec = Math.max(0, sec || 0);
+  const m = Math.floor(sec/60);
+  const s = Math.floor(sec%60);
+  return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
+function setStatus(t){ const el=$("statusBadge"); if(el) el.textContent=t; }
+function setProgress(text,pct){
+  const t=$("progressText"); if(t) t.textContent=text;
+  const p=$("progressPct");  if(p) p.textContent=pct+"%";
+  const b=$("progressBar");  if(b) b.style.width=pct+"%";
+}
 
-  function fmtTime(sec) {
-    sec = Math.max(0, sec || 0);
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
-  }
+// ---------- Audio engine state ----------
+let ac=null, masterGain=null, limiter=null;
+let buffers=[], nodes=[], sources=[];
+let isLoaded=false, isPlaying=false, isLoading=false, loopOn=false;
+let startAt=0, offset=0, duration=0, raf=null;
 
-  function setStatus(text) { const el = $("statusBadge"); if (el) el.textContent = text; }
-  function setProgress(text, pct) {
-    const t = $("progressText"); if (t) t.textContent = text;
-    const p = $("progressPct");  if (p) p.textContent = pct + "%";
-    const b = $("progressBar");  if (b) b.style.width = pct + "%";
-  }
+// ---------- Seek ----------
+const seek = $("seek");
+let seeking=false;
 
-  // Entrada animada (mantiene tu estética)
-  (function markReady(){
-    const run = () => requestAnimationFrame(() => document.body.classList.add("is-ready"));
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
-    else run();
-  })();
+function updateClock(t){
+  const tCur=$("tCur"); if(tCur) tCur.textContent=fmtTime(t);
+  const clock=$("clockBadge"); if(clock) clock.textContent=fmtTime(t)+" / "+fmtTime(duration);
+}
+function uiSeekTo(valSec){
+  const x=Math.max(0, Math.min(duration, valSec));
+  updateClock(x);
+}
+if(seek){
+  seek.addEventListener("pointerdown", ()=>{seeking=true;},{passive:true});
+  window.addEventListener("pointerup", ()=>{seeking=false;},{passive:true});
+  seek.addEventListener("touchstart", ()=>{seeking=true;},{passive:true});
+  window.addEventListener("touchend", ()=>{seeking=false;},{passive:true});
 
-  // ---------- Audio Engine State ----------
-  let ac = null;
-  let masterGain = null;
-  let limiter = null;
+  seek.addEventListener("input", ()=>{
+    if(!isLoaded) return;
+    uiSeekTo(Number(seek.value));
+  });
+  seek.addEventListener("change", ()=>{
+    if(!isLoaded) return;
+    setOffset(Number(seek.value), true);
+  });
+}
 
-  let buffers = [];     // AudioBuffer[]
-  let nodes = [];       // {gain, pan, muted, solo} per track
-  let sources = [];     // {src, gainNode, panNode} per track currently playing
+// ---------- AudioContext / Master ----------
+function ensureAudioContext(){
+  if(ac) return;
+  ac = new (window.AudioContext||window.webkitAudioContext)();
 
-  let isLoaded = false;
-  let isPlaying = false;
-  let isLoading = false;
-  let loopOn = false;
+  masterGain = ac.createGain();
+  masterGain.gain.value = Number($("masterVol")?.value ?? 1);
 
-  let startAt = 0;      // ac.currentTime when playback started
-  let offset = 0;       // seconds into track where playback starts
-  let duration = 0;     // max duration across buffers
-  let raf = null;
+  limiter = ac.createDynamicsCompressor();
+  limiter.threshold.value = -6;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.25;
 
-  // ---------- Seek ----------
-  const seek = $("seek");
-  let seeking = false;
+  masterGain.connect(limiter);
+  limiter.connect(ac.destination);
 
-  function updateClock(t) {
-    const tCur = $("tCur"); if (tCur) tCur.textContent = fmtTime(t);
-    const clock = $("clockBadge"); if (clock) clock.textContent = fmtTime(t) + " / " + fmtTime(duration);
-  }
-
-  function uiSeekTo(valSec) {
-    const newOffset = Math.max(0, Math.min(duration, valSec));
-    updateClock(newOffset);
-  }
-
-  if (seek) {
-    // Pointer + touch para móvil
-    seek.addEventListener("pointerdown", () => { seeking = true; }, { passive: true });
-    window.addEventListener("pointerup", () => { seeking = false; }, { passive: true });
-    seek.addEventListener("touchstart", () => { seeking = true; }, { passive: true });
-    window.addEventListener("touchend", () => { seeking = false; }, { passive: true });
-
-    seek.addEventListener("input", () => {
-      if (!isLoaded) return;
-      uiSeekTo(Number(seek.value));
+  const masterVol=$("masterVol");
+  if(masterVol){
+    masterVol.addEventListener("input",(e)=>{
+      if(!masterGain) return;
+      const v=Number(e.target.value);
+      masterGain.gain.cancelScheduledValues(ac.currentTime);
+      masterGain.gain.setTargetAtTime(v, ac.currentTime, 0.02);
     });
-
-    // Al soltar, reubica (reinicia si está reproduciendo)
-    seek.addEventListener("change", () => {
-      if (!isLoaded) return;
-      setOffset(Number(seek.value), true);
-    });
   }
-
-  // ---------- AudioContext / Master ----------
-  function ensureAudioContext() {
-    if (ac) return;
-
-    ac = new (window.AudioContext || window.webkitAudioContext)();
-
-    masterGain = ac.createGain();
-    masterGain.gain.value = Number($("masterVol")?.value ?? 1);
-
-    limiter = ac.createDynamicsCompressor();
-    limiter.threshold.value = -6;
-    limiter.knee.value = 0;
-    limiter.ratio.value = 20;
-    limiter.attack.value = 0.003;
-    limiter.release.value = 0.25;
-
-    masterGain.connect(limiter);
-    limiter.connect(ac.destination);
-
-    const masterVol = $("masterVol");
-    if (masterVol) {
-      masterVol.addEventListener("input", (e) => {
-        if (!masterGain) return;
-        const v = Number(e.target.value);
-        try {
-          masterGain.gain.cancelScheduledValues(ac.currentTime);
-          masterGain.gain.setTargetAtTime(v, ac.currentTime, 0.02);
-        } catch (_) {
-          masterGain.gain.value = v;
-        }
-      });
+}
+function decodeArrayBuffer(arr){
+  return new Promise((resolve,reject)=>ac.decodeAudioData(arr, resolve, reject));
+}
+function getConcurrency(){
+  const hc=navigator.hardwareConcurrency||4;
+  return Math.max(2, Math.min(6, hc-1));
+}
+async function mapLimit(items, limit, workerFn, progressFn){
+  const results=new Array(items.length);
+  let next=0, done=0;
+  const workers=Array.from({length:Math.min(limit, items.length)}, async ()=>{
+    while(true){
+      const i=next++;
+      if(i>=items.length) break;
+      results[i]=await workerFn(items[i], i);
+      done++;
+      if(progressFn) progressFn(done, items.length, items[i], i);
     }
-  }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
-  function decodeArrayBuffer(arr) {
-    return new Promise((resolve, reject) => {
-      ac.decodeAudioData(arr, resolve, reject);
-    });
-  }
-
-  function getConcurrency() {
-    const hc = navigator.hardwareConcurrency || 4;
-    return Math.max(2, Math.min(6, hc - 1));
-  }
-
-  async function mapLimit(items, limit, workerFn, progressFn) {
-    const results = new Array(items.length);
-    let next = 0, done = 0;
-
-    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (true) {
-        const i = next++;
-        if (i >= items.length) break;
-        results[i] = await workerFn(items[i], i);
-        done++;
-        if (progressFn) progressFn(done, items.length, items[i], i);
-      }
-    });
-
-    await Promise.all(workers);
-    return results;
-  }
-
-  // ---------- Loading ----------
-  async function loadAll() {
-    if (isLoading) return;
-    isLoading = true;
-
-    try {
-      if (isPlaying) stopPlayback();
-
-      ensureAudioContext();
-      setStatus("Cargando…");
-      setProgress("Descargando y preparando audio…", 0);
-
-      const limit = getConcurrency();
-
-      const bufs = await mapLimit(
-        TRACKS,
-        limit,
-        async (tr) => {
-          const res = await fetch(tr.url, { cache: "force-cache" });
-          if (!res.ok) throw new Error("HTTP " + res.status + " (" + tr.url + ")");
-          const arr = await res.arrayBuffer();
-          return await decodeArrayBuffer(arr);
-        },
-        (done, total, tr) => {
-          const pct = Math.round((done / total) * 100);
-          setProgress(`Cargadas ${done}/${total}: ${tr.name}`, pct);
-        }
-      );
-
-      buffers = bufs;
-      duration = Math.max(...buffers.map(b => b.duration));
-
-      if (seek) {
-        seek.max = String(duration);
-        seek.step = "0.01";
-        seek.value = "0";
-      }
-
-      isLoaded = true;
-      offset = 0;
-
-      const tDur = $("tDur"); if (tDur) tDur.textContent = fmtTime(duration);
-      updateClock(0);
-
-      buildMixerUI();
-
-      setStatus("Cargado");
-      const smallInfo = $("smallInfo"); if (smallInfo) smallInfo.textContent = "Cargado. Pulsa Reproducir.";
-      setProgress("Carga completa.", 100);
-
-      // Mostrar mezclador / ocultar hero (no dependemos de clases CSS)
-      const hero = $("hero");   if (hero) hero.style.display = "none";
-      const mixer = $("mixer"); if (mixer) mixer.style.display = "grid";
-      const btnReload = $("btnReload"); if (btnReload) btnReload.classList.remove("hidden");
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  // ---------- Mixer UI ----------
-  function buildMixerUI() {
-    const wrap = $("tracks");
-    if (!wrap) return;
-
-    // Forzar 1 columna SIEMPRE (independiente del CSS)
-    wrap.style.display = "flex";
-    wrap.style.flexDirection = "column";
-    wrap.style.gap = "12px";
-
-    wrap.innerHTML = "";
-    nodes = [];
-
-    for (let i = 0; i < TRACKS.length; i++) {
-      const tr = TRACKS[i];
-      const card = document.createElement("div");
-      card.className = "track";
-      card.innerHTML = `
-        <div class="trackTop">
-          <div class="trackName">${tr.name}</div>
-          <div class="pill">Pista ${String(i+1).padStart(2,"0")}</div>
-        </div>
-
-        <div class="controls">
-          <div class="controlRow">
-            <label><img class="iconSm" src="assets/icons/vol.svg" alt="">Vol</label>
-            <input class="slider" data-kind="vol" data-i="${i}" type="range" min="0" max="2" step="0.01" value="1.0" />
-          </div>
-
-          <div class="controlRow">
-            <label><img class="iconSm" src="assets/icons/pan.svg" alt="">Pan</label>
-            <input class="slider" data-kind="pan" data-i="${i}" type="range" min="-1" max="1" step="0.01" value="0" />
-          </div>
-
-          <div class="btnRow">
-            <button class="btnMini" data-kind="mute" data-i="${i}"><img class="iconSm" src="assets/icons/mute.svg" alt="">Mute</button>
-            <button class="btnMini" data-kind="solo" data-i="${i}"><img class="iconSm" src="assets/icons/solo.svg" alt="">Solo</button>
-          </div>
-        </div>
-      `;
-      wrap.appendChild(card);
-
-      nodes.push({ gain: 1.0, pan: 0, muted: false, solo: false });
-    }
-
-    // Sliders (en tiempo real)
-    wrap.querySelectorAll("input[data-kind]").forEach(el => {
-      el.addEventListener("input", (e) => {
-        const i = Number(e.target.dataset.i);
-        const kind = e.target.dataset.kind;
-        const v = Number(e.target.value);
-        if (kind === "vol") nodes[i].gain = v;
-        if (kind === "pan") nodes[i].pan = v;
-        applyMixLive(); // aplica durante reproducción
-      });
-    });
-
-    // Botones Mute / Solo
-    wrap.querySelectorAll("button[data-kind]").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const el = e.currentTarget;
-        const i = Number(el.dataset.i);
-        const kind = el.dataset.kind;
-
-        if (kind === "mute") {
-          nodes[i].muted = !nodes[i].muted;
-          el.classList.toggle("on", nodes[i].muted);
-        } else if (kind === "solo") {
-          nodes[i].solo = !nodes[i].solo;
-          el.classList.toggle("on", nodes[i].solo);
-        }
-        applyMixLive();
-      });
-    });
-  }
-
-  // ---------- Live Mix ----------
-  function computeAudible(i) {
-    const anySolo = nodes.some(n => n.solo);
-    if (anySolo) return nodes[i].solo;
-    return !nodes[i].muted;
-  }
-
-  function applyMixLive() {
-    if (!ac) return;
-
-    for (let i = 0; i < sources.length; i++) {
-      const s = sources[i];
-      if (!s) continue;
-
-      const audible = computeAudible(i);
-      const g = audible ? nodes[i].gain : 0.0;
-
-      try {
-        s.gainNode.gain.cancelScheduledValues(ac.currentTime);
-        s.gainNode.gain.setTargetAtTime(g, ac.currentTime, 0.02);
-
-        if (s.panNode) {
-          s.panNode.pan.cancelScheduledValues(ac.currentTime);
-          s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
-        }
-      } catch (_) {}
-    }
-  }
-
-  // ---------- Transport ----------
-  function stopSources() {
-    for (const s of sources) {
-      if (!s) continue;
-      try { s.src.stop(0); } catch (_) {}
-      try { s.src.disconnect(); } catch (_) {}
-      try { s.gainNode.disconnect(); } catch (_) {}
-      try { if (s.panNode) s.panNode.disconnect(); } catch (_) {}
-    }
-    sources = [];
-  }
-
-  function startPlayback() {
-    if (!isLoaded) return;
-
+// ---------- Loading ----------
+async function loadAll(){
+  if(isLoading) return;
+  isLoading=true;
+  try{
+    if(isPlaying) stopPlayback();
     ensureAudioContext();
-    if (ac.state === "suspended") ac.resume();
+    setStatus("Cargando…");
+    setProgress("Descargando y preparando audio…", 0);
 
-    stopSources();
-    sources = [];
-
-    const when = ac.currentTime + 0.08;
-    startAt = when - offset;
-
-    for (let i = 0; i < buffers.length; i++) {
-      const buf = buffers[i];
-
-      const src = ac.createBufferSource();
-      src.buffer = buf;
-
-      src.loop = loopOn;
-      if (loopOn) { src.loopStart = 0; src.loopEnd = duration; }
-
-      const gainNode = ac.createGain();
-      const panNode = (ac.createStereoPanner) ? ac.createStereoPanner() : null;
-
-      const audible = computeAudible(i);
-      gainNode.gain.value = audible ? nodes[i].gain : 0.0;
-
-      if (panNode) {
-        panNode.pan.value = nodes[i].pan;
-        src.connect(gainNode);
-        gainNode.connect(panNode);
-        panNode.connect(masterGain);
-      } else {
-        src.connect(gainNode);
-        gainNode.connect(masterGain);
+    const limit=getConcurrency();
+    const bufs = await mapLimit(
+      TRACKS, limit,
+      async (tr)=>{
+        const res = await fetch(tr.url, {cache:"force-cache"});
+        if(!res.ok) throw new Error("HTTP "+res.status+" ("+tr.url+")");
+        const arr = await res.arrayBuffer();
+        return await decodeArrayBuffer(arr);
+      },
+      (done,total,tr)=>{
+        const pct=Math.round((done/total)*100);
+        setProgress(`Cargadas ${done}/${total}: ${tr.name}`, pct);
       }
+    );
 
-      const startOffset = Math.min(offset, Math.max(0, buf.duration - 0.001));
-      src.start(when, startOffset);
+    buffers=bufs;
+    duration=Math.max(...buffers.map(b=>b.duration));
+    offset=0;
 
-      sources.push({ src, gainNode, panNode });
+    if(seek){
+      seek.max=String(duration);
+      seek.step="0.01";
+      seek.value="0";
     }
 
-    isPlaying = true;
-    setStatus("Reproduciendo");
-    applyMixLive();
-    tick();
-  }
+    isLoaded=true;
 
-  function pausePlayback() {
-    if (!isLoaded || !isPlaying) return;
-    offset = getCurrentTime();
-    stopSources();
-    isPlaying = false;
-    setStatus("En pausa");
-    if (raf) cancelAnimationFrame(raf);
-  }
-
-  function stopPlayback() {
-    if (!isLoaded) return;
-    stopSources();
-    isPlaying = false;
-    offset = 0;
-    setStatus("Detenido");
+    const tDur=$("tDur"); if(tDur) tDur.textContent=fmtTime(duration);
     updateClock(0);
-    if (seek) seek.value = "0";
-    if (raf) cancelAnimationFrame(raf);
+
+    buildMixerUI();
+
+    setStatus("Cargado");
+    const small=$("smallInfo"); if(small) small.textContent="Cargado. Pulsa Reproducir.";
+    setProgress("Carga completa.", 100);
+
+    const hero=$("hero"); if(hero) hero.style.display="none";
+    const mixer=$("mixer"); if(mixer) mixer.style.display="grid";
+    const btnReload=$("btnReload"); if(btnReload) btnReload.classList.remove("hidden");
+  } finally {
+    isLoading=false;
+  }
+}
+
+// ---------- Mixer UI ----------
+function buildMixerUI(){
+  const wrap=$("tracks");
+  if(!wrap) return;
+
+  // 1 columna SIEMPRE
+  wrap.style.display="flex";
+  wrap.style.flexDirection="column";
+  wrap.style.gap="12px";
+
+  wrap.innerHTML="";
+  nodes=[];
+
+  for(let i=0;i<TRACKS.length;i++){
+    const tr=TRACKS[i];
+    const card=document.createElement("div");
+    card.className="track";
+    card.innerHTML=`
+      <div class="trackTop">
+        <div class="trackName">${tr.name}</div>
+        <div class="pill">Pista ${String(i+1).padStart(2,"0")}</div>
+      </div>
+
+      <div class="controls">
+        <div class="controlRow">
+          <label><img class="iconSm" src="assets/icons/vol.svg" alt="">Vol</label>
+          <input class="slider" data-kind="vol" data-i="${i}" type="range" min="0" max="2" step="0.01" value="1.0" />
+        </div>
+
+        <div class="controlRow">
+          <label><img class="iconSm" src="assets/icons/pan.svg" alt="">Pan</label>
+          <input class="slider" data-kind="pan" data-i="${i}" type="range" min="-1" max="1" step="0.01" value="0" />
+        </div>
+
+        <div class="btnRow">
+          <button class="btn btnMini" data-kind="mute" data-i="${i}"><img class="iconSm" src="assets/icons/mute.svg" alt="">Mute</button>
+          <button class="btn btnMini" data-kind="solo" data-i="${i}"><img class="iconSm" src="assets/icons/solo.svg" alt="">Solo</button>
+        </div>
+      </div>
+    `;
+    wrap.appendChild(card);
+    nodes.push({gain:1.0, pan:0, muted:false, solo:false});
   }
 
-  function setOffset(newOffset, restartIfPlaying) {
-    offset = Math.max(0, Math.min(duration, newOffset));
-    updateClock(offset);
-    if (seek) seek.value = String(offset);
-    if (restartIfPlaying && isPlaying) startPlayback();
-  }
+  wrap.querySelectorAll("input[data-kind]").forEach(el=>{
+    el.addEventListener("input",(e)=>{
+      const i=Number(e.target.dataset.i);
+      const kind=e.target.dataset.kind;
+      const v=Number(e.target.value);
+      if(kind==="vol") nodes[i].gain=v;
+      if(kind==="pan") nodes[i].pan=v;
+      applyMixLive();
+    });
+  });
 
-  function getCurrentTime() {
-    if (!isPlaying) return offset;
-    const t = ac.currentTime - startAt;
-    return Math.max(0, Math.min(duration, t));
-  }
+  wrap.querySelectorAll("button[data-kind]").forEach(btn=>{
+    btn.addEventListener("click",(e)=>{
+      const el=e.currentTarget;
+      const i=Number(el.dataset.i);
+      const kind=el.dataset.kind;
 
-  function tick() {
-    const t = getCurrentTime();
-    updateClock(t);
-    if (seek && !seeking) seek.value = String(t);
+      if(kind==="mute"){
+        nodes[i].muted=!nodes[i].muted;
+        el.classList.toggle("on", nodes[i].muted);
+      } else if(kind==="solo"){
+        nodes[i].solo=!nodes[i].solo;
+        el.classList.toggle("on", nodes[i].solo);
+      }
+      applyMixLive();
+    });
+  });
+}
 
-    if (!loopOn && t >= duration - 0.02) {
-      stopPlayback();
-      return;
+// ---------- Live Mix ----------
+function computeAudible(i){
+  const anySolo = nodes.some(n=>n.solo);
+  if(anySolo) return nodes[i].solo;
+  return !nodes[i].muted;
+}
+function applyMixLive(){
+  if(!ac) return;
+  for(let i=0;i<sources.length;i++){
+    const s=sources[i];
+    if(!s) continue;
+
+    const audible=computeAudible(i);
+    const g = audible ? nodes[i].gain : 0.0;
+
+    s.gainNode.gain.cancelScheduledValues(ac.currentTime);
+    s.gainNode.gain.setTargetAtTime(g, ac.currentTime, 0.02);
+
+    if(s.panNode){
+      s.panNode.pan.cancelScheduledValues(ac.currentTime);
+      s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
     }
-    raf = requestAnimationFrame(tick);
   }
+}
 
-  // ---------- UI Buttons ----------
-  $("btnEnter")?.addEventListener("click", async () => {
-    try {
-      await loadAll();
-      toast("Pistas cargadas. Consejo: usa SOLO para aislar instrumentos.");
-    } catch (e) {
-      console.error(e);
-      setStatus("Error de carga");
-      setProgress("Error. Revisa hosting y rutas.", 0);
-      toast("Error cargando audios. Verifica carpeta audio/ y nombres.");
+// ---------- Transport ----------
+function stopSources(){
+  for(const s of sources){
+    if(!s) continue;
+    try{s.src.stop(0);}catch(_){}
+    try{s.src.disconnect();}catch(_){}
+    try{s.gainNode.disconnect();}catch(_){}
+    try{if(s.panNode) s.panNode.disconnect();}catch(_){}
+  }
+  sources=[];
+}
+function startPlayback(){
+  if(!isLoaded) return;
+  ensureAudioContext();
+  if(ac.state==="suspended") ac.resume();
+
+  stopSources();
+  sources=[];
+
+  const when = ac.currentTime + 0.08;
+  startAt = when - offset;
+
+  for(let i=0;i<buffers.length;i++){
+    const buf=buffers[i];
+    const src=ac.createBufferSource();
+    src.buffer=buf;
+
+    src.loop=loopOn;
+    if(loopOn){ src.loopStart=0; src.loopEnd=duration; }
+
+    const gainNode=ac.createGain();
+    const panNode=(ac.createStereoPanner)?ac.createStereoPanner():null;
+
+    const audible=computeAudible(i);
+    gainNode.gain.value = audible ? nodes[i].gain : 0.0;
+
+    if(panNode){
+      panNode.pan.value=nodes[i].pan;
+      src.connect(gainNode);
+      gainNode.connect(panNode);
+      panNode.connect(masterGain);
+    } else {
+      src.connect(gainNode);
+      gainNode.connect(masterGain);
     }
-  });
 
-  $("btnReload")?.addEventListener("click", async () => {
-    try {
-      await loadAll();
-      toast("Pistas recargadas.");
-    } catch (e) {
-      console.error(e);
-      toast("No se pudieron recargar las pistas.");
-    }
-  });
+    const startOffset = Math.min(offset, Math.max(0, buf.duration-0.001));
+    src.start(when, startOffset);
 
-  function openTips(){
-    const o = $("tipsOverlay");
-    if (!o) return;
-    o.classList.add("on");
-    o.setAttribute("aria-hidden","false");
-  }
-  function closeTips(){
-    const o = $("tipsOverlay");
-    if (!o) return;
-    o.classList.remove("on");
-    o.setAttribute("aria-hidden","true");
+    sources.push({src, gainNode, panNode});
   }
 
-  $("btnTips")?.addEventListener("click", openTips);
-  $("btnCloseTips")?.addEventListener("click", closeTips);
-  $("tipsOverlay")?.addEventListener("click", (e) => {
-    if (e.target && e.target.id === "tipsOverlay") closeTips();
-  });
-  window.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeTips(); });
+  isPlaying=true;
+  setStatus("Reproduciendo");
+  applyMixLive();
+  tick();
+}
+function pausePlayback(){
+  if(!isLoaded || !isPlaying) return;
+  offset=getCurrentTime();
+  stopSources();
+  isPlaying=false;
+  setStatus("En pausa");
+  if(raf) cancelAnimationFrame(raf);
+}
+function stopPlayback(){
+  if(!isLoaded) return;
+  stopSources();
+  isPlaying=false;
+  offset=0;
+  setStatus("Detenido");
+  updateClock(0);
+  if(seek) seek.value="0";
+  if(raf) cancelAnimationFrame(raf);
+}
+function setOffset(newOffset, restartIfPlaying){
+  offset=Math.max(0, Math.min(duration, newOffset));
+  updateClock(offset);
+  if(seek) seek.value=String(offset);
+  if(restartIfPlaying && isPlaying) startPlayback();
+}
+function getCurrentTime(){
+  if(!isPlaying) return offset;
+  const t = ac.currentTime - startAt;
+  return Math.max(0, Math.min(duration, t));
+}
+function tick(){
+  const t=getCurrentTime();
+  updateClock(t);
+  if(seek && !seeking) seek.value=String(t);
 
-  $("btnPlay")?.addEventListener("click", () => {
-    if (!isLoaded) { toast("Primero pulsa “Entrar y cargar pistas”."); return; }
-    startPlayback();
-  });
-  $("btnPause")?.addEventListener("click", pausePlayback);
-  $("btnStop")?.addEventListener("click", stopPlayback);
+  if(!loopOn && t>=duration-0.02){
+    stopPlayback();
+    return;
+  }
+  raf=requestAnimationFrame(tick);
+}
 
-  $("btnLoop")?.addEventListener("click", () => {
-    loopOn = !loopOn;
-    const lb = $("loopBadge");
-    if (lb) lb.textContent = "Loop: " + (loopOn ? "ON" : "OFF");
-    if (isPlaying) startPlayback();
-  });
+// ---------- Buttons ----------
+$("btnEnter")?.addEventListener("click", async ()=>{
+  try{
+    await loadAll();
+    toast("Pistas cargadas. Usa SOLO para aislar instrumentos.");
+  }catch(e){
+    console.error(e);
+    setStatus("Error de carga");
+    setProgress("Error. Revisa hosting y rutas.", 0);
+    toast("Error cargando audios. Revisa carpeta audio/ y nombres.");
+  }
+});
+$("btnReload")?.addEventListener("click", async ()=>{
+  try{ await loadAll(); toast("Pistas recargadas."); }
+  catch(e){ console.error(e); toast("No se pudieron recargar."); }
+});
+$("btnPlay")?.addEventListener("click", ()=>{
+  if(!isLoaded){ toast("Primero pulsa “Entrar y cargar pistas”."); return; }
+  startPlayback();
+});
+$("btnPause")?.addEventListener("click", pausePlayback);
+$("btnStop")?.addEventListener("click", stopPlayback);
 
-  $("btnResetMix")?.addEventListener("click", () => {
-    if (!isLoaded) return;
-    nodes.forEach(n => { n.gain = 1.0; n.pan = 0; n.muted = false; n.solo = false; });
+$("btnLoop")?.addEventListener("click", ()=>{
+  loopOn=!loopOn;
+  const lb=$("loopBadge"); if(lb) lb.textContent="Loop: "+(loopOn?"ON":"OFF");
+  if(isPlaying) startPlayback();
+});
 
-    document.querySelectorAll("input[data-kind='vol']").forEach(el => el.value = "1.0");
-    document.querySelectorAll("input[data-kind='pan']").forEach(el => el.value = "0");
-    document.querySelectorAll("button[data-kind='mute']").forEach(el => el.classList.remove("on"));
-    document.querySelectorAll("button[data-kind='solo']").forEach(el => el.classList.remove("on"));
+$("btnResetMix")?.addEventListener("click", ()=>{
+  if(!isLoaded) return;
+  nodes.forEach(n=>{ n.gain=1.0; n.pan=0; n.muted=false; n.solo=false; });
 
-    applyMixLive();
-    toast("Mezcla reiniciada.");
-  });
-</script>
+  document.querySelectorAll("input[data-kind='vol']").forEach(el=>el.value="1.0");
+  document.querySelectorAll("input[data-kind='pan']").forEach(el=>el.value="0");
+  document.querySelectorAll("button[data-kind='mute']").forEach(el=>el.classList.remove("on"));
+  document.querySelectorAll("button[data-kind='solo']").forEach(el=>el.classList.remove("on"));
+
+  applyMixLive();
+  toast("Mezcla reiniciada.");
+});
+
+// Tips overlay (si existen)
+function openTips(){
+  const o=$("tipsOverlay"); if(!o) return;
+  o.classList.add("on"); o.setAttribute("aria-hidden","false");
+}
+function closeTips(){
+  const o=$("tipsOverlay"); if(!o) return;
+  o.classList.remove("on"); o.setAttribute("aria-hidden","true");
+}
+$("btnTips")?.addEventListener("click", openTips);
+$("btnCloseTips")?.addEventListener("click", closeTips);
+$("tipsOverlay")?.addEventListener("click",(e)=>{ if(e.target?.id==="tipsOverlay") closeTips(); });
+window.addEventListener("keydown",(e)=>{ if(e.key==="Escape") closeTips(); });
