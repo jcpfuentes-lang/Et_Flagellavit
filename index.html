@@ -1,604 +1,3 @@
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Et Flagellavit — Mezclador de pistas</title>
-  <meta name="description" content="Mezclador interactivo de pistas (stems) para estudio auditivo." />
-    <style>
-    :root{
-      --gold:#d8b27a;
-      --gold2:#f3d6a4;
-      --bronze:#b78a4f;
-      --blood:#7a1f1a;
-      --ink:#0b0a07;
-      --ink2:#120f0b;
-      --glass: rgba(12,10,7,0.62);
-      --glass2: rgba(12,10,7,0.42);
-      --stroke: rgba(243,214,164,0.22);
-      --stroke2: rgba(255,255,255,0.10);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.72);
-      --shadow: 0 18px 60px rgba(0,0,0,0.55);
-      --radius: 18px;
-    }
-
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      color:var(--text);
-      background: #070605;
-      overflow-x:hidden;
-    }
-
-    /* Fondo cinematográfico: portada a pantalla completa */
-    body::before{
-      content:"";
-      position:fixed; inset:0;
-      background-image:url("assets/cover.png");
-      background-size:cover;
-      background-position:center;
-      filter: contrast(1.05) saturate(1.02);
-      transform: scale(1.06);
-      z-index:-3;
-    }
-    /* Velo + viñeta + luces */
-    body::after{
-      content:"";
-      position:fixed; inset:0;
-      z-index:-2;
-      pointer-events:none;
-      background:
-        radial-gradient(900px 560px at 16% 22%, rgba(216,178,122,0.18), transparent 60%),
-        radial-gradient(800px 520px at 82% 18%, rgba(122,31,26,0.16), transparent 62%),
-        radial-gradient(900px 700px at 50% 92%, rgba(35,55,120,0.13), transparent 62%),
-        linear-gradient(180deg, rgba(5,5,8,0.70), rgba(5,5,8,0.88));
-    }
-    /* Grano sutil */
-    .grain{
-      position:fixed; inset:-40px;
-      z-index:-1; pointer-events:none;
-      opacity:0.10;
-      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
-      mix-blend-mode: overlay;
-    }
-
-    .wrap{max-width:1150px; margin:0 auto; padding: 18px 16px 40px}
-    a{color:inherit}
-
-    header{
-      position:sticky; top:0; z-index:30;
-      backdrop-filter: blur(14px);
-      background: linear-gradient(180deg, rgba(7,6,5,0.72), rgba(7,6,5,0.30));
-      border-bottom:1px solid rgba(243,214,164,0.14);
-    }
-    .topbar{
-      display:flex; align-items:center; justify-content:space-between;
-      gap:14px;
-      padding:12px 8px;
-    }
-    .brand{display:flex; gap:12px; align-items:center; min-width:0;}
-    .sigil{
-      width:42px; height:42px; flex:0 0 auto;
-      background: radial-gradient(circle at 30% 25%, rgba(243,214,164,0.85), rgba(216,178,122,0.30) 62%, rgba(0,0,0,0) 70%),
-                  url("assets/icons/favicon.svg");
-      background-size: cover;
-      border-radius: 14px;
-      border:1px solid rgba(243,214,164,0.20);
-      box-shadow: 0 10px 24px rgba(0,0,0,0.40);
-    }
-    h1{
-      margin:0;
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      font-weight:800;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      font-size: 18px;
-      line-height:1.1;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .sub{
-      font-size:12px;
-      color: var(--muted);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-
-    .actions{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end}
-    .badge{
-      padding:7px 10px;
-      border-radius:999px;
-      font-size:12px;
-      border:1px solid rgba(243,214,164,0.18);
-      background: linear-gradient(180deg, rgba(12,10,7,0.55), rgba(12,10,7,0.28));
-      color: rgba(255,255,255,0.88);
-      backdrop-filter: blur(12px);
-    }
-
-    main{display:grid; gap:16px; padding-top: 10px;}
-
-    .card{
-      border-radius: var(--radius);
-      border:1px solid rgba(243,214,164,0.18);
-      background: linear-gradient(180deg, var(--glass), var(--glass2));
-      box-shadow: var(--shadow);
-      overflow:hidden;
-      backdrop-filter: blur(14px);
-    }
-
-    /* HERO */
-    .hero{
-      min-height: 64vh;
-      display:grid;
-      grid-template-columns: 1.15fr 0.85fr;
-      gap:14px;
-      align-items:stretch;
-    }
-    @media (max-width: 960px){
-      .hero{grid-template-columns: 1fr; min-height:auto;}
-    }
-
-    .cover{
-      position:relative;
-      padding: 26px 24px 22px;
-    }
-    .cover::before{
-      content:"";
-      position:absolute; inset:0;
-      background:
-        radial-gradient(900px 520px at 25% 10%, rgba(243,214,164,0.18), transparent 60%),
-        linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.35));
-      pointer-events:none;
-    }
-
-    .title{
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      font-weight: 800;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      font-size: clamp(28px, 4.2vw, 54px);
-      margin: 0 0 10px 0;
-      text-shadow: 0 10px 35px rgba(0,0,0,0.55);
-    }
-    .lead{
-      margin:0;
-      max-width: 62ch;
-      color: rgba(255,255,255,0.86);
-      font-size: 15px;
-      line-height: 1.55;
-    }
-    .divider{
-      width:min(520px, 100%);
-      height:auto;
-      margin: 16px 0 14px;
-      opacity: 0.95;
-    }
-
-    .ctaRow{display:flex; gap:10px; flex-wrap:wrap; margin-top: 14px}
-    .btn{
-      appearance:none;
-      border:none;
-      cursor:pointer;
-      user-select:none;
-      display:inline-flex;
-      align-items:center;
-      gap:10px;
-      padding: 12px 16px;
-      border-radius: 16px;
-      font-weight: 700;
-      color: rgba(255,255,255,0.92);
-      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
-      border:1px solid rgba(243,214,164,0.16);
-      box-shadow: 0 12px 26px rgba(0,0,0,0.35);
-      backdrop-filter: blur(10px);
-      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      font-size: 12px;
-    }
-    .btn:hover{transform: translateY(-1px); border-color: rgba(243,214,164,0.28); box-shadow: 0 18px 36px rgba(0,0,0,0.45);}
-    .btn:active{transform: translateY(0px) scale(0.99)}
-    .btn .icon{width:20px; height:20px; display:block; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));}
-
-    .btn.primary{
-      color: #190d08;
-      background: linear-gradient(135deg, rgba(243,214,164,0.98), rgba(216,178,122,0.92));
-      border:1px solid rgba(243,214,164,0.55);
-    }
-    .btn.ghost{background: linear-gradient(180deg, rgba(10,10,14,0.30), rgba(10,10,14,0.18));}
-    .btn.danger{
-      background: linear-gradient(135deg, rgba(164,48,44,0.92), rgba(122,31,26,0.92));
-      border-color: rgba(243,214,164,0.22);
-    }
-
-    .btn.small{
-      padding:10px 12px;
-      border-radius: 14px;
-      font-size: 11px;
-    }
-    .btn.hidden{display:none !important;}
-
-    .info{padding:16px 16px 14px}
-    .kpis{display:grid; grid-template-columns: repeat(3, 1fr); gap:10px}
-    @media (max-width: 960px){ .kpis{grid-template-columns: 1fr;}}
-    .kpi{
-      border-radius: 16px;
-      border:1px solid rgba(243,214,164,0.14);
-      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
-      padding: 12px 12px;
-    }
-    .kpi .v{font-weight:800; font-size:14px; font-family: Cinzel, ui-serif, Georgia, serif; letter-spacing:.05em;}
-    .kpi .l{font-size:12px; color: rgba(255,255,255,0.74); margin-top:4px}
-
-    .progressWrap{margin-top:14px}
-    .progressTop{display:flex; justify-content:space-between; gap:10px; font-size:12px; color:rgba(255,255,255,0.80)}
-    .bar{height:10px; background: rgba(255,255,255,0.08); border:1px solid rgba(243,214,164,0.14); border-radius:999px; overflow:hidden; margin-top:8px}
-    #progressBar{height:100%; width:0%; background: linear-gradient(90deg, rgba(243,214,164,0.95), rgba(122,31,26,0.65), rgba(243,214,164,0.95));}
-
-    .hint{
-      margin-top: 12px;
-      border-left: 3px solid rgba(243,214,164,0.55);
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(0,0,0,0.20);
-      color: rgba(255,255,255,0.80);
-      font-size: 13px;
-      line-height:1.5;
-    }
-
-    /* MIXER */
-    .mixer{display:none}
-    .panel{padding: 16px}
-    .panelHeader{
-      display:flex; align-items:flex-start; justify-content:space-between;
-      gap:10px; margin-bottom: 12px;
-    }
-    .panelHeader h2{
-      margin:0;
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      font-size: 16px;
-    }
-    .small{font-size:12px; color:rgba(255,255,255,0.75); margin-top:4px}
-    .transport{
-      display:grid;
-      gap:10px;
-      border: 1px solid rgba(243,214,164,0.12);
-      border-radius: 18px;
-      padding: 12px;
-      background: rgba(0,0,0,0.18);
-      margin-bottom: 12px;
-    }
-    .transportRow{
-      display:flex; gap:10px; flex-wrap:wrap; align-items:center;
-    }
-    .transportRow .btn{font-family: Cinzel, ui-serif, Georgia, serif;}
-    .seekWrap{flex:1 1 260px; min-width: 220px}
-    .seekTop{display:flex; justify-content:space-between; font-size:12px; color:rgba(255,255,255,0.75)}
-    .seek{
-      width:100%;
-      margin-top:8px;
-    }
-    input[type="range"]{accent-color: var(--gold2);}
-    .controlRow{
-      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-      font-size: 12px;
-      color: rgba(255,255,255,0.78);
-    }
-    .controlRow label{
-      min-width: 70px;
-      display:flex; align-items:center; gap:8px;
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      letter-spacing: .05em;
-      text-transform: uppercase;
-      font-size: 11px;
-      opacity: .95;
-    }
-    .iconSm{width:18px; height:18px; display:block; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));}
-    .slider{flex: 1 1 220px}
-
-      .tracks{display:grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px}
-
-
-    .track{
-      border-radius: 18px;
-      border:1px solid rgba(243,214,164,0.14);
-      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
-      padding: 12px;
-      box-shadow: 0 10px 22px rgba(0,0,0,0.28);
-      position:relative;
-      overflow:hidden;
-    }
-    .track::before{
-      content:"";
-      position:absolute; inset:0;
-      background:
-        radial-gradient(700px 320px at 20% 0%, rgba(243,214,164,0.10), transparent 55%),
-        linear-gradient(90deg, rgba(243,214,164,0.18), transparent 28%);
-      opacity: .85;
-      pointer-events:none;
-    }
-    .trackTop{display:flex; justify-content:space-between; gap:10px; position:relative}
-    .trackName{
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      font-weight: 800;
-      font-size: 13px;
-    }
-    .pill{
-      font-size:11px;
-      padding:6px 10px;
-      border-radius:999px;
-      border:1px solid rgba(243,214,164,0.16);
-      background: rgba(0,0,0,0.18);
-      color: rgba(255,255,255,0.78);
-      white-space:nowrap;
-    }
-    .controls{margin-top:10px; display:grid; gap:10px; position:relative}
-    .btnRow{display:flex; gap:8px; flex-wrap:wrap}
-    .btnMini{
-      padding:9px 12px;
-      border-radius: 14px;
-      font-size: 11px;
-      background: rgba(0,0,0,0.20);
-      border:1px solid rgba(243,214,164,0.14);
-      text-transform: uppercase;
-    }
-    .btnMini.on{
-      background: linear-gradient(135deg, rgba(243,214,164,0.92), rgba(216,178,122,0.86));
-      color: #1b0c06;
-      border-color: rgba(243,214,164,0.55);
-    }
-
-    footer{
-      margin-top: 18px;
-      padding: 10px 6px;
-      color: rgba(255,255,255,0.65);
-      font-size: 12px;
-      text-align:center;
-    }
-
-    .toast{
-      position: fixed;
-      bottom: 18px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.65);
-      border: 1px solid rgba(243,214,164,0.18);
-      padding: 10px 14px;
-      border-radius: 14px;
-      box-shadow: 0 18px 40px rgba(0,0,0,0.55);
-      display:none;
-      max-width: min(780px, calc(100vw - 28px));
-      backdrop-filter: blur(12px);
-      color: rgba(255,255,255,0.90);
-    }
-
-    /* Overlay Tips (estilo Genially) */
-    .overlay{
-      position:fixed; inset:0;
-      display:none;
-      z-index: 50;
-      padding: 24px 16px;
-      background: rgba(0,0,0,0.72);
-      backdrop-filter: blur(10px);
-    }
-    .overlay.on{display:grid; place-items:center;}
-    .modal{
-      width: min(860px, 100%);
-      border-radius: 22px;
-      border: 1px solid rgba(243,214,164,0.22);
-      background: linear-gradient(180deg, rgba(12,10,7,0.78), rgba(12,10,7,0.52));
-      box-shadow: var(--shadow);
-      overflow:hidden;
-      position:relative;
-    }
-    .modalHeader{
-      display:flex; justify-content:space-between; align-items:center;
-      padding: 14px 16px;
-      border-bottom: 1px solid rgba(243,214,164,0.14);
-      background: rgba(0,0,0,0.18);
-    }
-    .modalHeader h3{
-      margin:0;
-      font-family: Cinzel, ui-serif, Georgia, serif;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      font-size: 14px;
-    }
-    .modalBody{padding: 14px 16px 18px; color: rgba(255,255,255,0.86); line-height:1.6;}
-    .modalBody ul{margin: 10px 0 0 18px; padding:0}
-    .modalBody li{margin: 6px 0}
-  
-    /* --- ENTRADA ANIMADA (estilo Genially/Canva) --- */
-    .js body:not(.is-ready) .anim-in{
-      opacity: 0;
-      transform: translateY(14px) scale(0.992);
-      filter: blur(14px);
-    }
-    .js body.is-ready .anim-in{
-      opacity: 1;
-      transform: none;
-      filter: blur(0);
-      transition:
-        opacity 1200ms cubic-bezier(.2,.8,.2,1),
-        transform 1200ms cubic-bezier(.2,.8,.2,1),
-        filter 1200ms cubic-bezier(.2,.8,.2,1);
-      will-change: opacity, transform, filter;
-    }
-    .js body.is-ready .delay-1{ transition-delay: 80ms; }
-    .js body.is-ready .delay-2{ transition-delay: 160ms; }
-    .js body.is-ready .delay-3{ transition-delay: 240ms; }
-    .js body.is-ready .delay-4{ transition-delay: 320ms; }
-
-/* Tiempo bajo el slider */
-.timeRow{
-  display:flex;
-  justify-content:space-between;
-  font-size:12px;
-  color:rgba(255,255,255,0.75);
-  margin-top:6px;
-}
-
-/* Mejor tacto en sliders */
-input[type="range"]{
-  width:100%;
-  touch-action: pan-y; /* permite arrastrar horizontal sin “pelear” con el scroll */
-}
-
-/* Móvil: botones y paddings */
-@media (max-width: 520px){
-  .wrap{padding: 14px 12px 28px;}
-  .topbar{flex-wrap:wrap; gap:10px;}
-  .actions{width:100%; justify-content:flex-start}
-  .hero{min-height:auto;}
-  .cover{padding: 18px 16px 16px;}
-  .info{padding: 14px;}
-  .panel{padding: 14px;}
-  .transportRow{align-items:stretch;}
-  .transportRow .btn{flex:1 1 160px; justify-content:center;}
-  .btnRow .btnMini{flex:1 1 120px; justify-content:center;}
-}
-
-  </style>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg">
-  <script>document.documentElement.classList.add('js');</script>
-</head>
-<body>
-<div class="grain" aria-hidden="true"></div>
-<div class="wrap">
-  <header class="anim-in delay-1">
-    <div class="topbar">
-      <div class="brand">
-        <div class="sigil" aria-hidden="true"></div>
-        <div style="min-width:0">
-          <h1>Et Flagellavit</h1>
-          <div class="sub">Mezclador didáctico de pistas (stems)</div>
-        </div>
-      </div>
-      <div class="actions">
-        <div class="badge" id="statusBadge">Listo para iniciar</div>
-        <button class="btn small ghost hidden" id="btnReload" title="Recargar pistas">
-          <img class="icon" src="assets/icons/load.svg" alt="">
-          Recargar
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <main>
-    <section class="hero anim-in delay-2" id="hero">
-      <div class="card cover">
-        <div class="coverContent">
-          <h2 class="title">Et Flagellavit</h2>
-          <img class="divider" src="assets/icons/divider.svg" alt="" />
-          <p class="lead">
-            Escucha, aísla y reconoce cada voz instrumental. Entra, espera a que cargue y mezcla a voluntad:
-            volumen, panorama, mute y solo por pista.
-          </p>
-          <div class="ctaRow">
-            <button class="btn primary" id="btnEnter"><img class="icon" src="assets/icons/load.svg" alt="">Entrar y cargar pistas</button>
-            <button class="btn ghost" id="btnTips"><img class="icon" src="assets/icons/tips.svg" alt="">Consejos de uso</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="card info">
-<div class="progressWrap">
-          <div class="progressTop">
-            <div id="progressText">Pulsa “Entrar y cargar pistas”.</div>
-            <div id="progressPct">0%</div>
-          </div>
-          <div class="bar"><div id="progressBar"></div></div>
-        </div>
-
-        <div class="hint">
-          Aplicación diseñada para estudiar y preparar esta obra. Permite un total control de qué pista/instrumento suena en cada momento, modificando el volumen y paneo para resaltar o enmascarar las diferentes voces instrumentales.
-        </div>
-      </div>
-    </section>
-
-    <section class="mixer anim-in delay-3" id="mixer">
-      <div class="card panel">
-        <div class="panelHeader">
-          <div>
-            <h2>Transporte</h2>
-            <div class="small" id="smallInfo">Cargado. Pulsa Reproducir.</div>
-          </div>
-          <div class="badge" id="clockBadge">00:00 / 00:00</div>
-        </div>
-
-        <div class="transport">
-          <div class="transportRow">
-            <button class="btn primary" id="btnPlay"><img class="icon" src="assets/icons/play.svg" alt="">Reproducir</button>
-            <button class="btn" id="btnPause"><img class="icon" src="assets/icons/pause.svg" alt="">Pausa</button>
-            <button class="btn danger" id="btnStop"><img class="icon" src="assets/icons/stop.svg" alt="">Stop</button>
-            <button class="btn" id="btnResetMix"><img class="icon" src="assets/icons/reset.svg" alt="">Reset mezcla</button>
-            <span class="badge" id="loopBadge">Loop: OFF</span>
-            <button class="btn" id="btnLoop">Alternar loop</button>
-          </div>
-
-          <div>
-            <input class="slider" id="seek" type="range" min="0" max="0" step="0.01" value="0" />
-            <div class="timeRow">
-              <span id="tCur">00:00</span>
-              <span id="tDur">00:00</span>
-            </div>
-          </div>
-
-          <div class="controlRow">
-            <label for="masterVol"><img class="iconSm" src="assets/icons/vol.svg" alt="">Master</label>
-            <input class="slider" id="masterVol" type="range" min="0" max="1" step="0.01" value="0.9" />
-          </div>
-        </div>
-
-        <div class="tracks" id="tracks"></div>
-      </div>
-    </section>
-  </main>
-
-  <footer class="anim-in delay-4">
-    Creado por José Carlos Piñar Fuentes para la A.M. Ntro. Padre Jesús Cautivo de Cazorla (Jaén)
-  </footer>
-</div>
-
-<div class="overlay" id="tipsOverlay" aria-hidden="true">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tipsTitle">
-    <div class="modalHeader">
-      <h3 id="tipsTitle">Consejos de escucha y estudio</h3>
-      <button class="btn small ghost" id="btnCloseTips">
-        <img class="icon" src="assets/icons/stop.svg" alt="">
-        Cerrar
-      </button>
-    </div>
-    <div class="modalBody">
-      <p style="margin:0 0 10px 0;">
-        Sugerencia de trabajo (progresivo): aísla, compara e intégrate en cada voz. El oído aprenderá a localizar timbre, función y balance, esto hará que desafines menos.
-      </p>
-      <ul>
-        <li><b>Toca encima</b>, primero con tu instrumento activo y luego desactívalo para sentir tu aporte a la mezcla.</li>
-        <li><b>Añade pistas</b>: entrena la importancia de nuestra voz en cada momento.</li>
-        <li>Juega con el paneo (<b>“Pan”</b>): ubica espacialmente cada voz y mejora la separación auditiva.</li>
-        <li>Vuelve a la <b>mezcla completa</b> e intenta simular que estás en la banda.</li>
-      </ul>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-
 <script>
   // Marca el documento como listo para disparar la animación de entrada
   (function(){
@@ -629,9 +28,11 @@ input[type="range"]{
   let ac = null;
   let masterGain = null;
   let limiter = null;
+
   let buffers = [];            // AudioBuffer[]
   let nodes = [];              // {gain, pan, muted, solo}
   let sources = [];            // currently playing sources
+
   let isLoaded = false;
   let isPlaying = false;
   let loopOn = false;
@@ -641,7 +42,8 @@ input[type="range"]{
   let duration = 0;            // seconds (max of buffers)
   let raf = null;
 
-  <input class="slider" id="masterVol" type="range" min="0" max="2" step="0.01" value="1.20" />
+  // --- Seek (marcador temporal) ---
+  const seek = $("seek");
   let seeking = false;
 
   const uiSeekTo = (valSec) => {
@@ -650,8 +52,11 @@ input[type="range"]{
     $("clockBadge").textContent = fmtTime(newOffset) + " / " + fmtTime(duration);
   };
 
+  // Pointer + Touch (móvil/iOS)
   seek.addEventListener("pointerdown", () => { seeking = true; }, {passive:true});
   window.addEventListener("pointerup", () => { seeking = false; }, {passive:true});
+  seek.addEventListener("touchstart", () => { seeking = true; }, {passive:true});
+  window.addEventListener("touchend", () => { seeking = false; }, {passive:true});
 
   seek.addEventListener("input", () => {
     if (!isLoaded) return;
@@ -663,26 +68,36 @@ input[type="range"]{
     setOffset(Number(seek.value), true);
   });
 
-
   function ensureAudioContext() {
     if (ac) return;
     ac = new (window.AudioContext || window.webkitAudioContext)();
+
     masterGain = ac.createGain();
     masterGain.gain.value = Number($("masterVol").value);
+
     limiter = ac.createDynamicsCompressor();
-    limiter.threshold.value = -6;  // empieza a limitar cerca de -6 dB
+    limiter.threshold.value = -6;
     limiter.knee.value = 0;
-    limiter.ratio.value = 20;      // ratio alto -> “limiter”
+    limiter.ratio.value = 20;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.25;
 
     masterGain.connect(limiter);
     limiter.connect(ac.destination);
+
     $("masterVol").addEventListener("input", (e) => {
       if (!masterGain) return;
-      masterGain.gain.value = Number(e.target.value);
+      // suave y sin clicks
+      const v = Number(e.target.value);
+      try{
+        masterGain.gain.cancelScheduledValues(ac.currentTime);
+        masterGain.gain.setTargetAtTime(v, ac.currentTime, 0.02);
+      }catch(_){
+        masterGain.gain.value = v;
+      }
     });
   }
+
   function decodeArrayBuffer(arr) {
     return new Promise((resolve, reject) => {
       ac.decodeAudioData(arr, resolve, reject);
@@ -713,6 +128,9 @@ input[type="range"]{
   }
 
   async function loadAll() {
+    // si estaba sonando, paramos antes de recargar
+    if (isPlaying) stopPlayback();
+
     ensureAudioContext();
     $("statusBadge").textContent = "Cargando…";
     $("progressText").textContent = "Descargando y preparando audio…";
@@ -741,12 +159,12 @@ input[type="range"]{
 
     buffers = bufs;
     duration = Math.max(...buffers.map(b => b.duration));
+
     seek.max = String(duration);
     seek.step = "0.01";
     seek.value = "0";
 
     isLoaded = true;
-
     buildMixerUI();
 
     $("statusBadge").textContent = "Cargado";
@@ -762,12 +180,13 @@ input[type="range"]{
     $("btnReload").classList.remove("hidden");
   }
 
-
   function buildMixerUI() {
     const wrap = $("tracks");
     wrap.innerHTML = "";
-    nodes = [];
+    // Refuerzo: una sola columna incluso si el navegador cachea CSS viejo
+    wrap.style.gridTemplateColumns = "1fr";
 
+    nodes = [];
     for (let i = 0; i < TRACKS.length; i++) {
       const tr = TRACKS[i];
       const card = document.createElement("div");
@@ -797,12 +216,7 @@ input[type="range"]{
       `;
       wrap.appendChild(card);
 
-      nodes.push({
-        gain: 1.0,
-        pan: 0,
-        muted: false,
-        solo: false,
-      });
+      nodes.push({ gain: 1.0, pan: 0, muted: false, solo: false });
     }
 
     wrap.querySelectorAll("input[data-kind]").forEach(el => {
@@ -833,10 +247,6 @@ input[type="range"]{
         applyMixLive();
       });
     });
-
-
-    const _kt = $("kpiTracks");
-    if (_kt) _kt.textContent = String(TRACKS.length);
   }
 
   function computeAudible(i) {
@@ -845,15 +255,22 @@ input[type="range"]{
     return !nodes[i].muted;
   }
 
+  // Cambios en tiempo real durante reproducción
   function applyMixLive() {
+    if (!ac) return;
     for (let i = 0; i < sources.length; i++) {
       const s = sources[i];
       if (!s) continue;
       const audible = computeAudible(i);
       const g = audible ? nodes[i].gain : 0.0;
       try {
+        s.gainNode.gain.cancelScheduledValues(ac.currentTime);
         s.gainNode.gain.setTargetAtTime(g, ac.currentTime, 0.02);
-        if (s.panNode) s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
+
+        if (s.panNode) {
+          s.panNode.pan.cancelScheduledValues(ac.currentTime);
+          s.panNode.pan.setTargetAtTime(nodes[i].pan, ac.currentTime, 0.02);
+        }
       } catch (_) {}
     }
   }
@@ -885,10 +302,7 @@ input[type="range"]{
       const src = ac.createBufferSource();
       src.buffer = buf;
       src.loop = loopOn;
-      if (loopOn) {
-        src.loopStart = 0;
-        src.loopEnd = duration;
-      }
+      if (loopOn) { src.loopStart = 0; src.loopEnd = duration; }
 
       const gainNode = ac.createGain();
       const panNode = (ac.createStereoPanner) ? ac.createStereoPanner() : null;
@@ -914,6 +328,7 @@ input[type="range"]{
 
     isPlaying = true;
     $("statusBadge").textContent = "Reproduciendo";
+    applyMixLive(); // asegura estado actual de mute/solo/vol/pan
     tick();
   }
 
@@ -933,7 +348,7 @@ input[type="range"]{
     offset = 0;
     $("statusBadge").textContent = "Detenido";
     updateClock(0);
-    seek.value = 0;
+    seek.value = "0";
     if (raf) cancelAnimationFrame(raf);
   }
 
@@ -980,7 +395,6 @@ input[type="range"]{
     }
   });
 
-  
   $("btnReload").addEventListener("click", async () => {
     try{
       await loadAll();
@@ -1008,7 +422,7 @@ input[type="range"]{
   });
   window.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closeTips(); });
 
-$("btnPlay").addEventListener("click", () => {
+  $("btnPlay").addEventListener("click", () => {
     if (!isLoaded) { toast("Primero pulsa “Entrar y cargar pistas”."); return; }
     startPlayback();
   });
@@ -1032,5 +446,3 @@ $("btnPlay").addEventListener("click", () => {
     toast("Mezcla reiniciada.");
   });
 </script>
-</body>
-</html>
